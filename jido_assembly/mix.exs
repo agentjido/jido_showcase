@@ -54,7 +54,7 @@ defmodule Jido.Assembly.MixProject do
       {:jido_ai, "~> 2.2"},
       {:dotenvy, "~> 1.1"},
       {:lazy_html, "~> 0.1.12", only: :test},
-      {:req, "~> 0.6.3", override: true},
+      {:req, "~> 0.7.2", override: true},
       {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
       {:tailwind, "~> 0.5", runtime: Mix.env() == :dev},
       {:heroicons,
