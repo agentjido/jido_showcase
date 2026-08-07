@@ -70,6 +70,11 @@ jobs:
       - name: Check retired packages
         run: mix hex.audit
 
+      - name: Compile development configuration
+        env:
+          MIX_ENV: dev
+        run: mix compile --warnings-as-errors
+
       - name: Check formatting
         run: mix format --check-formatted
 
