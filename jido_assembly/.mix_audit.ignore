@@ -1,0 +1,3 @@
+# GitHub lists gun versions before 2.4.0 as vulnerable. gun 2.4.1 is installed.
+# The advisory has an incorrect gun patched-version value of 2.16.0.
+GHSA-w4f7-4cxr-rv3c

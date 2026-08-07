@@ -10,5 +10,18 @@ updates:
       time: "09:00"
       timezone: "America/Chicago"
     open-pull-requests-limit: 10
+    groups:
+      phoenix-stack:
+        patterns:
+          - "phoenix*"
+          - "bandit"
+          - "plug*"
+          - "thousand_island"
+          - "websock*"
+      jido-stack:
+        patterns:
+          - "jido*"
+          - "req"
+          - "req_llm"
     commit-message:
       prefix: "chore(deps)"

@@ -5,7 +5,7 @@ defmodule Jido.Assembly.MixProject do
     [
       app: :jido_assembly,
       version: "0.1.0",
-      elixir: "~> 1.15",
+      elixir: ">= 1.18.0 and < 2.0.0",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
@@ -54,7 +54,8 @@ defmodule Jido.Assembly.MixProject do
       {:jido_ai, "~> 2.2"},
       {:dotenvy, "~> 1.1"},
       {:lazy_html, "~> 0.1.12", only: :test},
-      {:req, "~> 0.6.3", override: true},
+      {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false},
+      {:req, "~> 0.7.2", override: true},
       {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
       {:tailwind, "~> 0.5", runtime: Mix.env() == :dev},
       {:heroicons,
@@ -92,7 +93,13 @@ defmodule Jido.Assembly.MixProject do
         "esbuild jido_assembly --minify",
         "phx.digest"
       ],
-      precommit: ["compile --warnings-as-errors", "deps.unlock --check-unused", "format", "test"]
+      precommit: [
+        "format --check-formatted",
+        "compile --warnings-as-errors",
+        "deps.unlock --check-unused",
+        "test",
+        "deps.audit --ignore-file .mix_audit.ignore"
+      ]
     ]
   end
 end

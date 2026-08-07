@@ -1,0 +1,137 @@
+name: CI
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  quality:
+    name: ${{ matrix.showcase }} / Elixir ${{ matrix.elixir }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - showcase: jido_assembly
+            path: jido_assembly
+            elixir: "1.18.4"
+            otp: "27.3"
+          - showcase: jido_assembly
+            path: jido_assembly
+            elixir: "1.19.5"
+            otp: "28.3"
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ matrix.path }}
+    env:
+      MIX_ENV: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Erlang and Elixir
+        uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1.24.0
+        with:
+          otp-version: ${{ matrix.otp }}
+          elixir-version: ${{ matrix.elixir }}
+
+      - name: Restore Mix cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ${{ matrix.path }}/deps
+            ${{ matrix.path }}/_build
+          key: ${{ runner.os }}-mix-${{ matrix.showcase }}-otp-${{ matrix.otp }}-elixir-${{ matrix.elixir }}-${{ hashFiles(format('{0}/mix.lock', matrix.path)) }}
+          restore-keys: |
+            ${{ runner.os }}-mix-${{ matrix.showcase }}-otp-${{ matrix.otp }}-elixir-${{ matrix.elixir }}-
+
+      - name: Install Hex and Rebar
+        run: |
+          set -euo pipefail
+          mix local.hex --force
+          mix local.rebar --force
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Check retired packages
+        run: mix hex.audit
+
+      - name: Compile development configuration
+        env:
+          MIX_ENV: dev
+        run: mix compile --warnings-as-errors
+
+      - name: Check formatting
+        run: mix format --check-formatted
+
+      - name: Compile with warnings as errors
+        run: mix compile --warnings-as-errors
+
+      - name: Run tests
+        run: mix test
+
+      - name: Check unused dependencies
+        run: mix deps.unlock --check-unused
+
+      - name: Audit dependencies
+        run: mix deps.audit --ignore-file .mix_audit.ignore
+
+  application-build:
+    name: jido_assembly / Application build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+        working-directory: jido_assembly
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Erlang and Elixir
+        uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1.24.0
+        with:
+          otp-version: "28.3"
+          elixir-version: "1.19.5"
+
+      - name: Restore Mix cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            jido_assembly/deps
+            jido_assembly/_build
+          key: ${{ runner.os }}-mix-jido-assembly-build-${{ hashFiles('jido_assembly/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-jido-assembly-build-
+
+      - name: Install Hex and Rebar
+        run: |
+          set -euo pipefail
+          mix local.hex --force
+          mix local.rebar --force
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Install asset tools
+        run: mix assets.setup
+
+      - name: Compile Hologram application
+        run: HOLOGRAM_START=1 mix compile --force
+
+      - name: Build production assets
+        run: mix assets.deploy
