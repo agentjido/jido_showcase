@@ -10,7 +10,9 @@ defmodule Jido.Assembly.MixProject do
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       # No patched cowlib Hex release is available yet.
-      hex: [ignore_advisories: ["CVE-2026-43969", "CVE-2026-43966"]],
+      hex: [
+        ignore_advisories: ["CVE-2026-43971", "CVE-2026-43969", "CVE-2026-43966"]
+      ],
       deps: deps(),
       compilers: [:phoenix_live_view] ++ Mix.compilers() ++ [:assembly_hologram_prune, :hologram],
       listeners: [Phoenix.CodeReloader]
