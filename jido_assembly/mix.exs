@@ -9,9 +9,9 @@ defmodule Jido.Assembly.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
-      # No patched cowlib Hex release is available yet.
+      # No patched Hex release is available for these Gun and cowlib advisories.
       hex: [
-        ignore_advisories: ["CVE-2026-43971", "CVE-2026-43969", "CVE-2026-43966"]
+        ignore_advisories: ["CVE-2026-43969", "CVE-2026-43966"]
       ],
       deps: deps(),
       compilers: [:phoenix_live_view] ++ Mix.compilers() ++ [:assembly_hologram_prune, :hologram],
