@@ -16,7 +16,9 @@ defmodule Jido.AssemblyWeb.SignalPresenter do
     :thread_id,
     :is_typing,
     :reaction,
-    :room_id
+    :room_id,
+    :user_id,
+    :state
   ]
 
   def summary(signals, type) when is_list(signals) and is_binary(type) do
@@ -76,6 +78,10 @@ defmodule Jido.AssemblyWeb.SignalPresenter do
   defp put_data({"reaction", value}, summary), do: put_known(summary, :reaction, value)
   defp put_data({:room_id, value}, summary), do: put_known(summary, :room_id, value)
   defp put_data({"room_id", value}, summary), do: put_known(summary, :room_id, value)
+  defp put_data({:user_id, value}, summary), do: put_known(summary, :user_id, value)
+  defp put_data({"user_id", value}, summary), do: put_known(summary, :user_id, value)
+  defp put_data({:state, value}, summary), do: put_known(summary, :state, value)
+  defp put_data({"state", value}, summary), do: put_known(summary, :state, value)
   defp put_data(_entry, summary), do: summary
 
   defp put_known(summary, _key, nil), do: summary

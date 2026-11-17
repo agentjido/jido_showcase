@@ -3,15 +3,15 @@ defmodule Jido.Assembly.Agents do
   On-demand Jido AI agent orchestration for the Assembly developer demo.
 
   The agents are ordinary Assembly participants. A bounded round starts one
-  short-lived `Jido.AI.Agent` runtime per persona, asks for one chat-sized
-  response, then writes the response through `Jido.Assembly.Chat` so SQLite,
-  Jido Messaging signals, Hologram broadcasts, mentions, and reactions all use
-  the same path as human messages.
+  short-lived graph-first Jido V3 Agent per persona, asks for one chat-sized
+  response, then writes the response through `Jido.Assembly.Chat` so durable
+  storage, Runtime Signals, Hologram broadcasts, mentions, and reactions all
+  use the same path as human messages.
   """
 
-  alias Jido.Assembly.{Chat, Messaging, Seeds}
+  alias Jido.Assembly.{Chat, ChatRuntime, Seeds}
 
-  @model :assembly_haiku
+  @model "anthropic:claude-haiku-4-5"
   @max_agents_per_round 3
   @max_rounds_per_prompt 2
   @max_reply_chars 420
@@ -35,7 +35,7 @@ defmodule Jido.Assembly.Agents do
   def snapshot do
     %{
       agents: Enum.map(all(), &agent_view/1),
-      enabled: api_key_present?(),
+      enabled: scripted_mode?() or api_key_present?(),
       model: model_label(),
       safety: %{
         max_agents_per_round: @max_agents_per_round,
@@ -43,12 +43,12 @@ defmodule Jido.Assembly.Agents do
         max_reply_chars: @max_reply_chars,
         recent_message_count: @recent_message_count
       },
-      missing_api_key: !api_key_present?()
+      missing_api_key: !scripted_mode?() and !api_key_present?()
     }
   end
 
   def run_round(room_id, opts \\ []) when is_binary(room_id) do
-    opts = normalize_opts(opts)
+    opts = Keyword.merge(runtime_options(), normalize_opts(opts))
     round_id = "agent-round:#{System.unique_integer([:positive])}"
 
     max_agents =
@@ -60,11 +60,11 @@ defmodule Jido.Assembly.Agents do
       Keyword.get(opts, :safety_enabled, true) != true ->
         {:error, :safety_required}
 
-      !responder?(opts) && !api_key_present?() ->
+      !responder?(opts) && !inference_client?(opts) && !api_key_present?() ->
         {:error, :missing_api_key}
 
       true ->
-        with {:ok, room} <- Messaging.get_room(room_id) do
+        with {:ok, room} <- ChatRuntime.get_room(room_id) do
           round_limit =
             opts
             |> Keyword.get(:round_limit, @max_rounds_per_prompt)
@@ -134,6 +134,11 @@ defmodule Jido.Assembly.Agents do
     end
   end
 
+  @doc "Returns the explicit local Agent mode options."
+  def runtime_options do
+    if scripted_mode?(), do: [responder: &scripted_reply/4], else: []
+  end
+
   def error_to_string(:missing_api_key), do: "Add ANTHROPIC_API_KEY before running AI agents."
   def error_to_string(:missing_prompt), do: "Ask a question before running the agents."
   def error_to_string(:safety_required), do: "Turn the safety cap back on before running agents."
@@ -154,7 +159,7 @@ defmodule Jido.Assembly.Agents do
            Chat.send_message_command(room.id, reply, agent.id,
              role: :assistant,
              metadata: %{
-               source: "jido_ai",
+               source: "jido",
                agent_id: agent.id,
                agent_name: agent.name,
                agent_round_id: round_id,
@@ -188,20 +193,56 @@ defmodule Jido.Assembly.Agents do
     timeout = Keyword.get(opts, :timeout, @default_timeout_ms)
     agent_id = "#{agent.id}:#{System.unique_integer([:positive])}"
 
-    with {:ok, pid} <- Jido.Assembly.Jido.start_agent(agent.module, id: agent_id) do
+    signal =
+      agent.module.request_signal!(%{
+        input: prompt,
+        model: @model,
+        options: %{temperature: 0.35, max_tokens: 140},
+        limits: %{model_calls: 2, retries: 1, elapsed_ms: timeout}
+      })
+
+    with {:ok, pid} <- Jido.start_agent(Jido.Assembly.Jido, agent.module, id: agent_id),
+         :ok <- Jido.AgentServer.await_ready(pid) do
       try do
-        agent.module.ask_sync(pid, prompt,
-          timeout: timeout,
-          max_iterations: 2,
-          llm_opts: [
-            temperature: 0.35,
-            max_tokens: 140,
-            receive_timeout: timeout
-          ]
-        )
+        call_opts = [timeout: timeout, context: inference_context(opts)]
+
+        pid
+        |> Jido.AgentServer.call(signal, call_opts)
+        |> agent_reply()
       after
-        _ = Jido.Assembly.Jido.stop_agent(pid)
+        _ = Jido.stop_agent(Jido.Assembly.Jido, pid)
       end
+    end
+  end
+
+  defp agent_reply(
+         {:ok,
+          %Jido.AgentServer.TurnResult{
+            status: :committed,
+            reply: %{data: %{status: :completed, output: output}}
+          }}
+       )
+       when is_binary(output),
+       do: {:ok, output}
+
+  defp agent_reply(
+         {:ok,
+          %Jido.AgentServer.TurnResult{
+            reply: %{data: %{status: status} = data}
+          }}
+       )
+       when status in [:blocked, :failed],
+       do: {:error, {:agent_response, status, Map.get(data, :reason)}}
+
+  defp agent_reply({:ok, %Jido.AgentServer.TurnResult{status: status, error: error}}),
+    do: {:error, {:agent_turn, status, error}}
+
+  defp agent_reply({:error, reason}), do: {:error, reason}
+
+  defp inference_context(opts) do
+    case Keyword.get(opts, :inference_client) do
+      client when is_atom(client) -> %{jido_ai_inference_client: client}
+      _other -> %{}
     end
   end
 
@@ -291,8 +332,8 @@ defmodule Jido.Assembly.Agents do
   end
 
   defp timeline_messages(room_id) do
-    case Messaging.room_timeline(room_id, limit: 500) do
-      {:ok, %{messages: messages}} -> messages
+    case ChatRuntime.list_room_history(room_id, limit: 500) do
+      {:ok, history} -> Enum.map(history, &Chat.message_record/1)
       {:error, _reason} -> []
     end
   end
@@ -323,15 +364,7 @@ defmodule Jido.Assembly.Agents do
   defp extract_text(%{text: text}) when is_binary(text), do: text
   defp extract_text(%{"text" => text}) when is_binary(text), do: text
 
-  defp extract_text(value) do
-    if Code.ensure_loaded?(Jido.AI.Turn) and function_exported?(Jido.AI.Turn, :extract_text, 1) do
-      Jido.AI.Turn.extract_text(value)
-    else
-      inspect(value)
-    end
-  rescue
-    _error -> inspect(value)
-  end
+  defp extract_text(value), do: inspect(value)
 
   defp compact_text(value) do
     value
@@ -367,13 +400,18 @@ defmodule Jido.Assembly.Agents do
   end
 
   defp model_label do
-    Jido.AI.model_label(@model)
-  rescue
-    _error -> "anthropic:claude-haiku-4-5"
+    if scripted_mode?(), do: "scripted:jido-assembly-demo", else: @model
   end
 
+  defp scripted_reply(agent, room, transcript, _opts) do
+    {:ok,
+     "#{agent.name} checked #{room.name} with #{Enum.count(transcript)} visible messages. The scripted V3 path is ready for the next bounded step."}
+  end
+
+  defp scripted_mode?, do: Application.get_env(:jido_assembly, :agent_mode, :live) == :scripted
+
   defp api_key_present? do
-    present?(ReqLLM.get_key(:anthropic_api_key)) or present?(ReqLLM.get_key("ANTHROPIC_API_KEY"))
+    present?(System.get_env("ANTHROPIC_API_KEY"))
   end
 
   defp present?(value) when is_binary(value), do: String.trim(value) != ""
@@ -388,6 +426,7 @@ defmodule Jido.Assembly.Agents do
   defp metadata_value(_metadata, _key), do: nil
 
   defp responder?(opts), do: Keyword.has_key?(opts, :responder)
+  defp inference_client?(opts), do: Keyword.has_key?(opts, :inference_client)
 
   defp normalize_opts(opts) when is_list(opts), do: opts
   defp normalize_opts(opts) when is_map(opts), do: Map.to_list(opts)

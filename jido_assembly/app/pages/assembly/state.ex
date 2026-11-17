@@ -34,6 +34,7 @@ defmodule Jido.Assembly.Pages.Assembly.State do
       agent_error: nil,
       agent_safety_enabled: true,
       agent_inter_agent_enabled: true,
+      mobile_panel: "",
       rail_target: "channels"
     ]
   end
@@ -92,6 +93,7 @@ defmodule Jido.Assembly.Pages.Assembly.State do
     |> put_state(:thread_open, false)
     |> put_state(:thread_root, nil)
     |> put_state(:thread_messages, [])
+    |> put_state(:mobile_panel, "")
     |> put_active_developer_context(
       developer_event("Room selected", "Hologram action", "#{room.prefix}#{room.name}")
     )
@@ -121,19 +123,17 @@ defmodule Jido.Assembly.Pages.Assembly.State do
   end
 
   def chat_contract(room) do
-    target_kind = if room.kind == "dm", do: "dm", else: "room"
-
     [
       %{
-        label: "Target",
-        value: "#{target_kind} #{room.id}",
-        detail: "Jido.Chat.MessagingTarget"
+        label: "Room",
+        value: "#{room.kind} #{room.id}",
+        detail: "Jido.Chat.Runtime.Room.Record"
       },
-      %{label: "Payload", value: "text", detail: "Jido.Chat.PostPayload"},
+      %{label: "Payload", value: "text", detail: "Jido.Chat.Post"},
       %{
         label: "Write path",
-        value: "post_message",
-        detail: "SQLite commit plus jido.messaging.* signal"
+        value: "Jido.call",
+        detail: "SQLite commit plus jido.chat.room.message fact"
       }
     ]
   end

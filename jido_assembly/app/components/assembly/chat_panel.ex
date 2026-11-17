@@ -37,6 +37,26 @@ defmodule Jido.Assembly.Components.Assembly.ChatPanel do
             <p class="mt-1 max-w-[70ch] truncate text-sm text-[var(--assembly-chat-muted)]">{@active_topic}</p>
           </div>
           <div class="flex items-center gap-2">
+            <button
+              aria-label="Open workspace tools"
+              class="grid size-9 place-items-center rounded-md border border-[var(--assembly-chat-line)] bg-[var(--assembly-chat-raised)] text-[var(--assembly-chat-muted)] md:hidden"
+              id="assembly-mobile-workspace-trigger"
+              type="button"
+              title="Workspace tools"
+              $click={:open_mobile_panel, panel: "workspace"}
+            >
+              <span class="hero-bars-3 size-5"></span>
+            </button>
+            <button
+              aria-label="Open developer inspector"
+              class="grid size-9 place-items-center rounded-md border border-[var(--assembly-chat-line)] bg-[var(--assembly-chat-raised)] text-[var(--assembly-chat-muted)] md:hidden"
+              id="assembly-mobile-inspector-trigger"
+              type="button"
+              title="Developer inspector"
+              $click={:open_mobile_panel, panel: "inspector"}
+            >
+              <span class="hero-command-line size-5"></span>
+            </button>
             <span class="hidden items-center gap-2 rounded-md border border-[var(--assembly-chat-line)] bg-[var(--assembly-chat-raised)] px-2 py-1.5 text-sm font-semibold text-[var(--assembly-chat-muted)] sm:inline-flex">
               <img class="size-7 rounded-md bg-[var(--assembly-chat-pill)] object-cover" alt={@current_user.name} src={@current_user.avatar_url} />
               As {@current_user.name}
@@ -146,7 +166,7 @@ defmodule Jido.Assembly.Components.Assembly.ChatPanel do
       >
         <div class="space-y-1" data-assembly-message-list>
           <div class="mx-4 mb-3 rounded-md border border-[var(--assembly-chat-line)] bg-[var(--assembly-chat-raised)] px-4 py-3 text-sm text-[var(--assembly-chat-muted)] sm:mx-6">
-            Ops workflow showcase: local chat, provider connectors, workflow events, threads, reactions, and agents all persist through jido_messaging.
+            Ops workflow showcase: local chat, provider connectors, workflow events, threads, reactions, and agents all persist through Jido Chat V3.
             <span class="ml-2 font-semibold text-[var(--assembly-chat-text)]">{@connector_snapshot.headline}</span>
           </div>
 
@@ -244,9 +264,6 @@ defmodule Jido.Assembly.Components.Assembly.ChatPanel do
                 >
                   <span class="hero-chat-bubble-left-ellipsis size-4"></span>
                 </button>
-                <button class="grid size-7 place-items-center rounded-full text-[var(--assembly-chat-muted)] transition hover:bg-[var(--assembly-chat-pill)] hover:text-[var(--assembly-chat-text)]" type="button" title="More actions" aria-label="More actions">
-                  <span class="hero-ellipsis-vertical size-4"></span>
-                </button>
               </div>
             </article>
           {/for}
@@ -255,29 +272,9 @@ defmodule Jido.Assembly.Components.Assembly.ChatPanel do
       </div>
 
       <footer class="border-t border-[var(--assembly-chat-line)] bg-[var(--assembly-chat-bg)] px-4 py-4 sm:px-6">
-        <form data-assembly-composer="message" class="mx-auto max-w-5xl overflow-hidden rounded-lg border border-[var(--assembly-chat-line)] bg-[var(--assembly-chat-input)] shadow-sm transition focus-within:border-[var(--assembly-chat-muted)] focus-within:ring-2 focus-within:ring-[var(--assembly-accent)]/25" $submit="send_message">
-          <div class="flex h-9 items-center gap-0.5 border-b border-[var(--assembly-chat-line)] px-2 text-[var(--assembly-chat-subtle)]">
-            <button class="grid size-7 place-items-center rounded-md text-sm font-bold transition hover:bg-[var(--assembly-chat-pill)] hover:text-[var(--assembly-chat-text)]" type="button" title="Bold" aria-label="Bold">B</button>
-            <button class="grid size-7 place-items-center rounded-md text-sm italic transition hover:bg-[var(--assembly-chat-pill)] hover:text-[var(--assembly-chat-text)]" type="button" title="Italic" aria-label="Italic">I</button>
-            <button class="grid size-7 place-items-center rounded-md text-sm underline transition hover:bg-[var(--assembly-chat-pill)] hover:text-[var(--assembly-chat-text)]" type="button" title="Underline" aria-label="Underline">U</button>
-            <button class="grid size-7 place-items-center rounded-md text-sm line-through transition hover:bg-[var(--assembly-chat-pill)] hover:text-[var(--assembly-chat-text)]" type="button" title="Strike" aria-label="Strike">S</button>
-            <span class="mx-1 h-5 w-px bg-[var(--assembly-chat-line)]"></span>
-            <button class="grid size-7 place-items-center rounded-md transition hover:bg-[var(--assembly-chat-pill)] hover:text-[var(--assembly-chat-text)]" type="button" title="Link" aria-label="Link">
-              <span class="hero-link size-4"></span>
-            </button>
-            <button class="grid size-7 place-items-center rounded-md transition hover:bg-[var(--assembly-chat-pill)] hover:text-[var(--assembly-chat-text)]" type="button" title="Numbered list" aria-label="Numbered list">
-              <span class="hero-numbered-list size-4"></span>
-            </button>
-            <button class="grid size-7 place-items-center rounded-md transition hover:bg-[var(--assembly-chat-pill)] hover:text-[var(--assembly-chat-text)]" type="button" title="Bulleted list" aria-label="Bulleted list">
-              <span class="hero-list-bullet size-4"></span>
-            </button>
-            <span class="mx-1 h-5 w-px bg-[var(--assembly-chat-line)]"></span>
-            <button class="grid size-7 place-items-center rounded-md transition hover:bg-[var(--assembly-chat-pill)] hover:text-[var(--assembly-chat-text)]" type="button" title="Code" aria-label="Code">
-              <span class="hero-code-bracket size-4"></span>
-            </button>
-          </div>
+        <form data-assembly-composer="message" class="mx-auto flex max-w-5xl items-center gap-2 rounded-lg border border-[var(--assembly-chat-line)] bg-[var(--assembly-chat-input)] p-2 shadow-sm transition focus-within:border-[var(--assembly-chat-muted)] focus-within:ring-2 focus-within:ring-[var(--assembly-accent)]/25" $submit="send_message">
           <input
-            class="h-12 w-full min-w-0 bg-transparent px-3 py-2 text-sm leading-6 text-[var(--assembly-chat-text)] outline-none placeholder:text-[var(--assembly-chat-subtle)]"
+            class="h-11 min-w-0 flex-1 bg-transparent px-2 py-2 text-sm leading-6 text-[var(--assembly-chat-text)] outline-none placeholder:text-[var(--assembly-chat-subtle)]"
             aria-label="Message body"
             autocomplete="off"
             name="body"
@@ -286,29 +283,9 @@ defmodule Jido.Assembly.Components.Assembly.ChatPanel do
             value={@draft}
             $input="draft_changed"
           />
-          <div class="flex h-10 items-center justify-between border-t border-[var(--assembly-chat-line)] px-2">
-            <div class="flex items-center gap-0.5 text-[var(--assembly-chat-muted)]">
-              <button class="grid size-8 place-items-center rounded-full bg-[var(--assembly-chat-pill)] transition hover:text-[var(--assembly-chat-text)]" type="button" title="Add attachment" aria-label="Add attachment">
-                <span class="hero-plus size-5"></span>
-              </button>
-              <button class="grid size-8 place-items-center rounded-md text-sm font-semibold transition hover:bg-[var(--assembly-chat-pill)] hover:text-[var(--assembly-chat-text)]" type="button" title="Formatting" aria-label="Formatting">Aa</button>
-              <button class="grid size-8 place-items-center rounded-md transition hover:bg-[var(--assembly-chat-pill)] hover:text-[var(--assembly-chat-text)]" type="button" title="Emoji" aria-label="Emoji">
-                <span class="hero-face-smile size-4"></span>
-              </button>
-              <button class="grid size-8 place-items-center rounded-md transition hover:bg-[var(--assembly-chat-pill)] hover:text-[var(--assembly-chat-text)]" type="button" title="Mention" aria-label="Mention">
-                <span class="text-lg leading-none">@</span>
-              </button>
-              <button class="grid size-8 place-items-center rounded-md transition hover:bg-[var(--assembly-chat-pill)] hover:text-[var(--assembly-chat-text)]" type="button" title="Record clip" aria-label="Record clip">
-                <span class="hero-video-camera size-4"></span>
-              </button>
-              <button class="grid size-8 place-items-center rounded-md transition hover:bg-[var(--assembly-chat-pill)] hover:text-[var(--assembly-chat-text)]" type="button" title="Voice" aria-label="Voice">
-                <span class="hero-microphone size-4"></span>
-              </button>
-            </div>
-            <button class="grid size-8 place-items-center rounded-md bg-[var(--assembly-accent)] text-stone-950 transition hover:bg-[var(--assembly-accent-strong)] hover:text-stone-100 disabled:opacity-60" type="submit" disabled={@send_pending} title="Send message" aria-label="Send message">
-              <span class="hero-paper-airplane size-4"></span>
-            </button>
-          </div>
+          <button class="grid size-10 shrink-0 place-items-center rounded-md bg-[var(--assembly-accent)] text-stone-950 transition hover:bg-[var(--assembly-accent-strong)] hover:text-stone-100 disabled:opacity-60" type="submit" disabled={@send_pending} title="Send message" aria-label="Send message">
+            <span class="hero-paper-airplane size-4"></span>
+          </button>
         </form>
         {%if @error}
           <p class="mx-auto mt-2 max-w-5xl text-sm font-semibold text-amber-200">{@error}</p>

@@ -6,49 +6,49 @@ defmodule Jido.AssemblyWeb.SignalPresenterTest do
   test "summarizes a signal as a compact Hologram payload" do
     {:ok, signal} =
       Jido.Signal.new(
-        "jido.messaging.participant.presence_changed",
+        "jido.assembly.presence.changed",
         %{
-          "participant_id" => "user:maggie",
-          "from" => :offline,
-          "to" => :online,
+          "user_id" => "user:maggie",
+          "from" => "offline",
+          "to" => "online",
           "ignored" => "not for UI payload"
         },
-        source: "jido_assembly.presence",
+        source: "/jido-assembly/presence",
         subject: "room:general"
       )
 
     assert SignalPresenter.summary(signal) == %{
              id: signal.id,
-             type: "jido.messaging.participant.presence_changed",
-             source: "jido_assembly.presence",
+             type: "jido.assembly.presence.changed",
+             source: "/jido-assembly/presence",
              subject: "room:general",
-             participant_id: "user:maggie",
-             from: :offline,
-             to: :online
+             user_id: "user:maggie",
+             from: "offline",
+             to: "online"
            }
   end
 
   test "selects the first matching signal type from a list" do
     {:ok, joined} =
       Jido.Signal.new(
-        "jido.messaging.room.participant_joined",
-        %{participant_id: "user:maggie"},
+        "jido.assembly.presence.joined",
+        %{user_id: "user:maggie"},
         source: "test",
         subject: "room:general"
       )
 
     {:ok, changed} =
       Jido.Signal.new(
-        "jido.messaging.participant.presence_changed",
-        %{participant_id: "user:maggie"},
+        "jido.assembly.presence.changed",
+        %{user_id: "user:maggie"},
         source: "test",
         subject: "room:general"
       )
 
-    assert %{type: "jido.messaging.participant.presence_changed"} =
+    assert %{type: "jido.assembly.presence.changed"} =
              SignalPresenter.summary([joined, changed], [
-               "jido.messaging.participant.presence_changed",
-               "jido.messaging.room.participant_joined"
+               "jido.assembly.presence.changed",
+               "jido.assembly.presence.joined"
              ])
   end
 end

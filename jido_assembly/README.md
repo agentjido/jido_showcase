@@ -2,11 +2,10 @@
 
 `jido_assembly` is the Jido Chat showcase app: agent-native team chat plus a
 bridge console, presented with familiar Slack-like chat primitives. It uses
-Hologram as the UI layer, Phoenix as the web shell, `jido_messaging` for durable
-chat primitives and bridge routing, SQLite for local persistence, Jido
-Signal-style events for UI updates, Phoenix Presence for online state,
-`jido_chat` adapters for optional Telegram and Discord connectors, and `jido_ai`
-for bounded AI participants in chat.
+Hologram as the UI layer, Phoenix as the web shell, Jido Chat V3 for managed
+Rooms and provider bridges, SQLite for local persistence, Jido Signal events
+for UI updates, Phoenix Presence for online state, and consolidated Jido V3 for
+bounded AI participants in chat.
 
 The package module prefix is `Jido.Assembly`.
 
@@ -19,20 +18,20 @@ The package module prefix is `Jido.Assembly`.
 - A seeded `#ops-workflow` room that drops directly into a realistic incident
   flow with humans, narrative agents, provider-shaped messages, and a workflow
   approval card.
-- Durable rooms, participants, messages, reactions, and thread replies through
-  `jido_messaging` and SQLite.
-- Hologram realtime broadcasts carrying compact `jido.messaging.*` signal
+- Durable Rooms, memberships, messages, reactions, and thread replies through
+  Jido Chat Runtime and the Assembly SQLite adapter.
+- Hologram realtime broadcasts carrying compact `jido.chat.*` signal
   metadata after durable writes commit.
-- Optional live Telegram and Discord bridge setup using `jido_messaging`
-  `BridgeConfig`, `RoomBinding`, and `RoutingPolicy` records. Without
+- Optional live Telegram and Discord bridge setup using durable provider
+  declarations, bridge bindings, and the managed Runtime process tree. Without
   credentials, seeded demo traffic keeps the app usable.
 - Three seeded ops agents, Triage Agent, Bridge Agent, and Runbook Agent, that
   can run a safety-capped agent round when `ANTHROPIC_API_KEY` is present.
 - A thin Phoenix web layer: Phoenix hosts Hologram, health checks, static
   assets, and Presence integration while the chat behavior lives in the app
   context.
-- A developer inspector that shows how Hologram, `jido_messaging`, Jido Signal,
-  SQLite, `jido_chat`, adapters, bridge delivery metadata, and Assembly
+- A developer inspector that shows how Hologram, Jido Chat Runtime, Jido Signal,
+  SQLite, adapters, bridge delivery metadata, and Assembly
   responsibilities fit together for the active room.
 
 ## Run
@@ -54,7 +53,7 @@ If another local app is already using port 4000:
 PORT=4002 mix holo
 ```
 
-Assembly stores local demo state in `data/jido_assembly.sqlite3`. Delete that
+Assembly stores local demo state in `data/jido_assembly_v3.sqlite3`. Delete that
 file if you want to reset the demo workspace.
 
 The default app works without connector credentials. To enable live connector
@@ -139,11 +138,10 @@ Without `ANTHROPIC_API_KEY`, only live agent actions are disabled.
 
 ## Dependency Note
 
-Assembly depends on released Hex packages for Hologram, `jido_messaging`, and
-the optional Telegram and Discord chat adapters. Hologram `0.9.2` includes the
-reflection fix for Erlang-compiled BEAM modules that use Elixir-style module
-names, such as `Luerl`. `jido_messaging` `1.1.0` includes the SQLite
-persistence, presence, and signal helper APIs that Assembly exercises.
+Assembly uses the consolidated Jido V3 source revision, local Jido Chat V3, and
+local Telegram and Discord V3 adapters. Hologram remains the client and Phoenix
+remains the web shell. Assembly owns its SQLite storage adapter and online
+presence service.
 
 The Phoenix-generated `heroicons` asset dependency still uses Tailwind Labs'
 optimized SVG checkout from GitHub because `assets/vendor/heroicons.js` reads
@@ -154,13 +152,13 @@ the `deps/heroicons/optimized` file tree directly.
 - `app/` contains Hologram pages, components, reducers, and server command
   handlers.
 - `lib/jido_assembly/` contains the Assembly backend context, bridge setup,
-  read projections, mentions, seeds, messaging integration, Presence adapter
+  read projections, mentions, seeds, Runtime integration, Presence adapter
   configuration, Jido AI agent orchestration, and developer inspector data.
 - `lib/jido_assembly_web/` stays thin: endpoint, router, Phoenix Presence,
   Hologram presence notifier, and signal presentation for the UI.
-- `jido_messaging` owns reusable messaging primitives, bridge configs, room
-  bindings, routing policies, and the SQLite adapter. Assembly owns the
-  Slack-like product choices and demo read models.
+- Jido Chat owns reusable Room, connection, binding, bridge, Signal, and storage
+  contracts. Assembly owns the SQLite implementation, product choices, and demo
+  read models.
 
 ## Testing Story
 
@@ -171,10 +169,9 @@ evaluation, client `action/3` state transitions, server `command/3` handling,
 and queued Hologram broadcasts.
 
 The local suite also checks the Assembly chat context, mentions, Presence
-adapter, connector setup, signal presenter, and wiring to the upstream
-`Jido.Messaging.Persistence.SQLite` adapter. Adapter-level durability tests
-belong in `jido_messaging`; Assembly should prove that the demo uses those
-primitives cleanly rather than duplicating low-level persistence coverage.
+adapter, connector setup, signal presenter, and wiring to the Assembly SQLite
+storage adapter. Jido Chat tests the generic storage contract. Assembly tests
+its concrete persistence and application wiring.
 
 Compared with Phoenix LiveView testing, this is lower-level. Hologram actions
 and commands are easy to unit test because they return `%Hologram.Component{}`

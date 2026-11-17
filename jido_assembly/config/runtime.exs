@@ -34,6 +34,14 @@ end
 config :jido_assembly, Jido.AssemblyWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
+agent_mode =
+  case System.get_env("JIDO_ASSEMBLY_AGENT_MODE") do
+    "scripted" -> :scripted
+    _other -> :live
+  end
+
+config :jido_assembly, :agent_mode, agent_mode
+
 if config_env() == :prod do
   # The secret key base is used to sign/encrypt cookies and other secrets.
   # A default value is used in config/dev.exs and config/test.exs but you

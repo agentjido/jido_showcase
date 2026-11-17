@@ -6,17 +6,9 @@ defmodule Mix.Tasks.Compile.AssemblyHologramPrune do
   @recursive true
 
   @server_only_apps [
-    :jido_messaging,
-    :jido_ai,
     :jido,
-    :jido_signal,
-    :jido_action,
     :jido_chat,
-    :zoi,
-    :yaml_elixir,
     :dotenvy,
-    :yamerl,
-    :fsmx,
     :req_llm,
     :req,
     :finch,

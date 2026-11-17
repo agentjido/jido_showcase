@@ -1,13 +1,9 @@
 defmodule Jido.Assembly.Chat.Projections do
-  @moduledoc """
-  Read-model projections for Assembly chat records.
+  @moduledoc "Assembly read models over durable Jido Chat V3 records."
 
-  `Jido.Assembly.Chat` owns the public context API and write operations. This
-  module reads canonical `Jido.Assembly.Messaging` records and turns them into
-  the room, message, person, reaction, and search maps consumed by Hologram.
-  """
-
-  alias Jido.Assembly.{Messaging, Seeds}
+  alias Jido.Assembly.{ChatRuntime, Seeds}
+  alias Jido.Chat.Message
+  alias Jido.Chat.Runtime.Room.Reaction
 
   @avatar_base_url "https://api.dicebear.com/10.x/lorelei/svg"
 
@@ -22,7 +18,7 @@ defmodule Jido.Assembly.Chat.Projections do
   end
 
   def room_views(presence \\ %{online_user_ids: []}) do
-    case Messaging.list_rooms(limit: 500) do
+    case ChatRuntime.list_rooms(limit: 500) do
       {:ok, rooms} ->
         rooms
         |> Enum.filter(&assembly_room?/1)
@@ -36,26 +32,28 @@ defmodule Jido.Assembly.Chat.Projections do
 
   def room_view(room, presence \\ %{online_user_ids: []}) do
     kind = room_kind(room)
-    participant = if kind == "dm", do: dm_participant(room, presence), else: nil
+    participant = if kind == "dm", do: dm_participant(room, presence)
     participant_id = participant && participant.id
     availability = if participant, do: participant.availability, else: "active"
-    online = participant_id && online?(presence, participant_id)
-    presence = if participant, do: if(online, do: availability, else: "offline"), else: "active"
+    online = not is_nil(participant_id) and online?(presence, participant_id)
+
+    presence_value =
+      if participant, do: if(online, do: availability, else: "offline"), else: "active"
+
     name = if participant, do: participant.name, else: room.name
-    topic = metadata_value(room.metadata, :topic, "No topic set.")
     member_ids = room_member_ids(room)
 
     %{
       id: room.id,
-      name: name,
+      name: name || room.id,
       kind: kind,
       participant_id: participant_id,
       prefix: if(kind == "dm", do: "@", else: "#"),
-      topic: topic,
+      topic: metadata_value(room.metadata, :topic, "No topic set."),
       unread: 0,
       mention_unread: 0,
       online: online,
-      presence: presence,
+      presence: presence_value,
       availability: availability,
       avatar: if(participant, do: participant.initials, else: "#"),
       avatar_url:
@@ -65,28 +63,32 @@ defmodule Jido.Assembly.Chat.Projections do
         ),
       tone:
         if(participant, do: participant.tone, else: "bg-[var(--assembly-accent)] text-stone-950"),
-      member_count: Enum.count(member_ids),
-      member_count_label: member_count_label(kind, member_ids, presence),
+      member_count: length(member_ids),
+      member_count_label: member_count_label(kind, member_ids, presence_value),
       position: metadata_value(room.metadata, :position, 0)
     }
   end
 
-  def split_rooms(rooms) do
-    Enum.split_with(rooms, &(&1.kind == "channel"))
-  end
+  def split_rooms(rooms), do: Enum.split_with(rooms, &(&1.kind == "channel"))
 
   def room_message_data(room_id, user_id, presence \\ %{online_user_ids: []}) do
-    case Messaging.room_timeline(room_id, limit: 500) do
-      {:ok, %{messages: messages, threads: replies_by_thread, reply_counts: reply_counts}} ->
+    case ChatRuntime.list_room_history(room_id, limit: 500) do
+      {:ok, history} ->
+        messages = Enum.map(history, &message_record/1)
+
+        reply_counts =
+          messages |> Enum.reject(&is_nil(&1.thread_id)) |> Enum.frequencies_by(& &1.thread_id)
+
         timeline =
           messages
-          |> Enum.map(fn message ->
-            reply_count = Map.get(reply_counts, message.id, 0)
-            message_view(message, user_id, reply_count, presence)
-          end)
+          |> Enum.filter(&is_nil(&1.thread_id))
+          |> Enum.map(&message_view(&1, user_id, Map.get(reply_counts, &1.id, 0), presence))
 
         threads =
-          Map.new(replies_by_thread, fn {thread_id, replies} ->
+          messages
+          |> Enum.reject(&is_nil(&1.thread_id))
+          |> Enum.group_by(& &1.thread_id)
+          |> Map.new(fn {thread_id, replies} ->
             {thread_id, Enum.map(replies, &message_view(&1, user_id, 0, presence))}
           end)
 
@@ -95,6 +97,25 @@ defmodule Jido.Assembly.Chat.Projections do
       {:error, _reason} ->
         {[], %{}}
     end
+  end
+
+  @doc false
+  def message_record(%Jido.Chat.Runtime.Room.HistoryRecord{} = record) do
+    message = message_from_fact(record.signal)
+
+    %{
+      id: message.id,
+      room_id: message.room_id,
+      sender_id: message.actor.id,
+      role: message.role,
+      content: message.content,
+      metadata: message.metadata,
+      thread_id: message.thread_id,
+      reply_to_id: message.reply_to_id,
+      inserted_at: record.inserted_at,
+      status: :sent,
+      reactions: reaction_map(record.room_id, message.id)
+    }
   end
 
   def list_message_views(room_id, user_id, presence \\ %{online_user_ids: []}) do
@@ -107,18 +128,15 @@ defmodule Jido.Assembly.Chat.Projections do
     Map.get(threads, root_message_id, [])
   end
 
-  def message_view_with_reply_count(message, user_id, presence \\ %{online_user_ids: []})
-
-  def message_view_with_reply_count(%{thread_id: thread_id} = message, user_id, presence)
-      when is_binary(thread_id) do
-    message_view(message, user_id, 0, presence)
-  end
-
-  def message_view_with_reply_count(message, user_id, presence) do
+  def message_view_with_reply_count(message, user_id, presence \\ %{online_user_ids: []}) do
     reply_count =
-      case Messaging.room_timeline(message.room_id, limit: 500) do
-        {:ok, %{reply_counts: reply_counts}} -> Map.get(reply_counts, message.id, 0)
-        {:error, _reason} -> 0
+      if is_binary(message.thread_id) do
+        0
+      else
+        case ChatRuntime.list_room_history(message.room_id, thread_id: message.id, limit: 500) do
+          {:ok, replies} -> length(replies)
+          {:error, _reason} -> 0
+        end
       end
 
     message_view(message, user_id, reply_count, presence)
@@ -166,41 +184,36 @@ defmodule Jido.Assembly.Chat.Projections do
   end
 
   def person(person_id, presence \\ %{online_user_ids: []})
-
   def person(nil, _presence), do: fallback_person("unknown")
 
   def person(person_id, presence) do
-    case Messaging.get_participant(person_id) do
-      {:ok, participant} ->
-        identity = participant.identity || %{}
-        availability = participant.presence |> Atom.to_string()
-        online = online?(presence, participant.id)
-        name = metadata_value(identity, :name, participant.id)
+    case Enum.find(people(), &(&1.id == person_id)) do
+      nil ->
+        fallback_person(person_id)
+
+      profile ->
+        availability =
+          profile |> Map.get(:availability, Map.get(profile, :presence, :online)) |> to_string()
+
+        online = online?(presence, person_id)
+        name = Map.get(profile, :name, person_id)
 
         %{
-          id: participant.id,
+          id: person_id,
           name: name,
-          initials:
-            metadata_value(
-              identity,
-              :initials,
-              initials_for(name)
-            ),
-          avatar_url: metadata_value(identity, :avatar_url, avatar_url(participant.id, name)),
-          title: metadata_value(identity, :title, ""),
-          tone: metadata_value(identity, :tone, "bg-stone-200 text-stone-950"),
+          initials: Map.get(profile, :initials, initials_for(name)),
+          avatar_url: Map.get(profile, :avatar_url, avatar_url(person_id, name)),
+          title: Map.get(profile, :title, ""),
+          tone: Map.get(profile, :tone, "bg-stone-200 text-stone-950"),
           availability: availability,
           online: online,
           presence: if(online, do: availability, else: "offline")
         }
-
-      {:error, :not_found} ->
-        fallback_person(person_id)
     end
   end
 
   def room_kind(room) do
-    metadata_value(room.metadata, :assembly_kind, Atom.to_string(room.type))
+    metadata_value(room.metadata, :assembly_kind, default_room_kind(room.kind))
   end
 
   def search(query, user_id, presence \\ %{online_user_ids: []}) do
@@ -226,6 +239,15 @@ defmodule Jido.Assembly.Chat.Projections do
     Map.get(metadata, key, Map.get(metadata, Atom.to_string(key), default))
   end
 
+  defp people do
+    Seeds.demo_users() ++
+      Seeds.agent_people() ++
+      [%{id: Seeds.system_user_id(), name: "Assembly", initials: "AS", presence: :online}]
+  end
+
+  defp default_room_kind(:direct), do: "dm"
+  defp default_room_kind(_kind), do: "channel"
+
   defp source_label("adapter", channel), do: connector_label(channel)
   defp source_label(:adapter, channel), do: connector_label(channel)
   defp source_label("local", channel) when channel in [:telegram, "telegram"], do: "Telegram"
@@ -234,8 +256,8 @@ defmodule Jido.Assembly.Chat.Projections do
   defp source_label(:local, channel) when channel in [:discord, "discord"], do: "Discord"
   defp source_label("workflow", _channel), do: "Workflow"
   defp source_label(:workflow, _channel), do: "Workflow"
-  defp source_label("jido_ai", _channel), do: "Agent"
-  defp source_label(:jido_ai, _channel), do: "Agent"
+  defp source_label("jido", _channel), do: "Agent"
+  defp source_label(:jido, _channel), do: "Agent"
   defp source_label("seed", _channel), do: "Assembly"
   defp source_label(:seed, _channel), do: "Assembly"
   defp source_label("jido_assembly", _channel), do: "Assembly"
@@ -243,19 +265,8 @@ defmodule Jido.Assembly.Chat.Projections do
   defp source_label(_source, _channel), do: "Local"
 
   defp source_detail(metadata) do
-    cond do
-      metadata_value(metadata, :external_message_id, nil) ->
-        ""
-
-      metadata_value(metadata, :workflow_run_id, nil) ->
-        metadata_value(metadata, :workflow_run_id, nil)
-
-      metadata_value(metadata, :route_decision, nil) ->
-        metadata_value(metadata, :route_decision, nil)
-
-      true ->
-        ""
-    end
+    metadata_value(metadata, :workflow_run_id, nil) ||
+      metadata_value(metadata, :route_decision, nil) || ""
   end
 
   defp connector_label(:telegram), do: "Telegram"
@@ -267,31 +278,20 @@ defmodule Jido.Assembly.Chat.Projections do
 
   defp author_name(sender, metadata) do
     external_name =
-      metadata_value(
-        metadata,
-        :display_name,
-        metadata_value(metadata, :username, nil)
-      )
+      metadata_value(metadata, :display_name, metadata_value(metadata, :username, nil))
 
-    cond do
-      generated_chat_id?(sender.id) && present?(external_name) ->
-        external_name
-
-      true ->
-        sender.name
-    end
+    if generated_chat_id?(sender.id) and present?(external_name),
+      do: external_name,
+      else: sender.name
   end
 
   defp message_avatar_url(sender, author) do
-    if generated_chat_id?(sender.id) && author != sender.name do
-      avatar_url(sender.id, author)
-    else
-      sender.avatar_url
-    end
+    if generated_chat_id?(sender.id) and author != sender.name,
+      do: avatar_url(sender.id, author),
+      else: sender.avatar_url
   end
 
   defp generated_chat_id?(person_id), do: person_id |> to_string() |> String.starts_with?("jch_")
-
   defp present?(value), do: value |> to_string() |> String.trim() != ""
 
   defp delivery_view(message, metadata) do
@@ -336,6 +336,28 @@ defmodule Jido.Assembly.Chat.Projections do
     timeline ++ (threads |> Map.values() |> List.flatten())
   end
 
+  defp message_from_fact(%Jido.Signal{data: %{"message" => %Message{} = message}}), do: message
+
+  defp message_from_fact(%Jido.Signal{data: %{"message" => message}}) when is_map(message),
+    do: Message.from_map(message)
+
+  defp reaction_map(room_id, message_id) do
+    case ChatRuntime.list_room_reactions(room_id, message_id: message_id) do
+      {:ok, reactions} ->
+        reactions
+        |> Enum.group_by(& &1.reaction, &Reaction.actor/1)
+        |> Map.new(fn {reaction, actors} ->
+          {reaction, Enum.map(actors, &actor_id/1)}
+        end)
+
+      {:error, _reason} ->
+        %{}
+    end
+  end
+
+  defp actor_id(%Jido.Agent.Address{id: id}), do: id
+  defp actor_id(id) when is_binary(id), do: id
+
   defp reaction_views(reactions, user_id) do
     reactions
     |> Enum.map(fn {emoji, user_ids} ->
@@ -346,7 +368,7 @@ defmodule Jido.Assembly.Chat.Projections do
         emoji: emoji,
         glyph: metadata.glyph,
         label: metadata.label,
-        count: Enum.count(user_ids),
+        count: length(user_ids),
         reacted: user_id in user_ids,
         user_ids: user_ids
       }
@@ -355,9 +377,7 @@ defmodule Jido.Assembly.Chat.Projections do
   end
 
   defp search_match?(message, query, room) do
-    values = [message.body, message.author, room.name]
-
-    Enum.any?(values, fn value ->
+    Enum.any?([message.body, message.author, room.name], fn value ->
       value |> to_string() |> String.downcase() |> String.contains?(query)
     end)
   end
@@ -379,16 +399,14 @@ defmodule Jido.Assembly.Chat.Projections do
     {kind_weight, metadata_value(room.metadata, :position, 0), room.name || ""}
   end
 
-  defp assembly_room?(room) do
-    metadata_value(room.metadata, :workspace_id, nil) == Seeds.workspace_id()
-  end
+  defp assembly_room?(room),
+    do: metadata_value(room.metadata, :workspace_id, nil) == Seeds.workspace_id()
 
   defp room_member_ids(room) do
-    metadata_value(
-      room.metadata,
-      :member_ids,
-      metadata_value(room.metadata, :participant_ids, [])
-    )
+    case ChatRuntime.list_room_memberships(room.id, status: :active, limit: 500) do
+      {:ok, memberships} -> Enum.map(memberships, &Jido.Chat.Runtime.Room.Membership.member/1)
+      {:error, _reason} -> metadata_value(room.metadata, :member_ids, [])
+    end
   end
 
   defp dm_participant(room, presence) do
@@ -399,16 +417,15 @@ defmodule Jido.Assembly.Chat.Projections do
     |> person(presence)
   end
 
-  defp member_count_label("dm", _member_ids, presence), do: presence
+  defp member_count_label("dm", _member_ids, presence_value), do: presence_value
 
   defp member_count_label(_kind, member_ids, _presence) do
-    count = Enum.count(member_ids)
+    count = length(member_ids)
     "#{count} #{if count == 1, do: "member", else: "members"}"
   end
 
-  defp online?(%{online_user_ids: online_user_ids}, participant_id) do
-    participant_id in online_user_ids
-  end
+  defp online?(%{online_user_ids: online_user_ids}, participant_id),
+    do: participant_id in online_user_ids
 
   defp online?(_presence, _participant_id), do: false
 
@@ -427,11 +444,10 @@ defmodule Jido.Assembly.Chat.Projections do
   end
 
   defp message_text(message) do
-    message.content
-    |> List.wrap()
-    |> Enum.find_value("", fn
+    Enum.find_value(message.content, "", fn
+      %Jido.Chat.Content{kind: :text, text: text} -> text
+      %Jido.Chat.Content{kind: :markdown} = content -> Jido.Chat.Content.fallback_text(content)
       %{type: "text", text: text} -> text
-      %{type: :text, text: text} -> text
       %{"type" => "text", "text" => text} -> text
       text when is_binary(text) -> text
       _other -> nil
@@ -439,10 +455,7 @@ defmodule Jido.Assembly.Chat.Projections do
   end
 
   defp format_time(nil), do: ""
-
-  defp format_time(%DateTime{} = inserted_at) do
-    Calendar.strftime(inserted_at, "%H:%M")
-  end
+  defp format_time(%DateTime{} = inserted_at), do: Calendar.strftime(inserted_at, "%H:%M")
 
   defp initials_for(value) do
     value

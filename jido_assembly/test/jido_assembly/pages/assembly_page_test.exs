@@ -3,7 +3,7 @@ defmodule Jido.Assembly.Pages.AssemblyTest do
 
   alias Hologram.Component.{Action, Command}
   alias Hologram.Server.Broadcast
-  alias Jido.Assembly.Components.Assembly.ThreadPanel
+  alias Jido.Assembly.Components.Assembly.{MobileWorkspacePanel, ThreadPanel}
   alias Jido.Assembly.{Chat, Presence}
   alias Jido.Assembly.Pages.Assembly
 
@@ -26,8 +26,8 @@ defmodule Jido.Assembly.Pages.AssemblyTest do
     assert component.state.workspace == %{id: "jido", name: "Jido Assembly"}
     assert component.state.active_room_id == @ops_room
     assert component.state.rail_target == "channels"
-    assert Enum.any?(component.state.developer_stack, &(&1.name == "Jido Chat"))
-    assert Enum.any?(component.state.developer_contract, &(&1.detail == "Jido.Chat.PostPayload"))
+    assert Enum.any?(component.state.developer_stack, &(&1.name == "Jido Chat Runtime"))
+    assert Enum.any?(component.state.developer_contract, &(&1.detail == "Jido.Chat.Post"))
     assert component.state.last_event.title == "Workspace loaded"
     assert Enum.any?(component.state.channels, &(&1.id == @ops_room))
     assert Enum.any?(component.state.channels, &(&1.id == "room:connector-lab"))
@@ -35,6 +35,7 @@ defmodule Jido.Assembly.Pages.AssemblyTest do
     assert Enum.any?(component.state.direct_messages, &(&1.id == "dm:triage"))
     assert Enum.map(component.state.agent_demo.agents, & &1.name) == @agent_names
     assert component.state.agent_prompt_draft == ""
+    assert component.state.mobile_panel == ""
     assert component.next_action == %Action{name: :presence_heartbeat, delay: 250}
     assert {{:workspace, Chat.workspace_id()}, "page"} in server.subscriptions
   end
@@ -69,12 +70,17 @@ defmodule Jido.Assembly.Pages.AssemblyTest do
                action_name: :presence_changed,
                params: %{
                  presence: %{online_user_ids: online_user_ids},
-                 signal: %{type: "jido.messaging.participant.presence_changed"}
+                 signal: %{type: "jido.assembly.presence.changed"}
                }
              }
            ] = server.broadcasts
 
     assert "user:maggie" in online_user_ids
+
+    assert Enum.any?(
+             Presence.snapshot().sessions,
+             &(&1.session_id == "session-test:presence-test")
+           )
   end
 
   test "presence_changed action queues a fresh read-model snapshot" do
@@ -85,7 +91,7 @@ defmodule Jido.Assembly.Pages.AssemblyTest do
         :presence_changed,
         %{
           presence: %{online_user_ids: ["user:maggie"]},
-          signal: %{type: "jido.messaging.participant.presence_changed"}
+          signal: %{type: "jido.assembly.presence.changed"}
         },
         component
       )
@@ -218,7 +224,7 @@ defmodule Jido.Assembly.Pages.AssemblyTest do
            } = component.next_command
   end
 
-  test "persist_message command writes through jido_messaging and broadcasts a Hologram action" do
+  test "persist_message command writes through Jido Chat and broadcasts a Hologram action" do
     body = "hologram command test #{System.unique_integer([:positive])}"
     server = %Server{cid: "page", instance_id: "command-test", session_id: "session-test"}
 
@@ -232,7 +238,7 @@ defmodule Jido.Assembly.Pages.AssemblyTest do
                params: %{
                  room_id: @ops_room,
                  message: message,
-                 signal: %{type: "jido.messaging.room.message_added"}
+                 signal: %{type: "jido.chat.room.message"}
                }
              }
            ] = server.broadcasts
@@ -340,6 +346,36 @@ defmodule Jido.Assembly.Pages.AssemblyTest do
     assert component.state.active_room_id == @ops_room
   end
 
+  test "mobile workspace and inspector panels are available and close with focus return" do
+    {component, _server} = init_page(Assembly)
+
+    workspace = Assembly.action(:open_mobile_panel, %{panel: "workspace"}, component)
+    assert workspace.state.mobile_panel == "workspace"
+
+    workspace_dom = MobileWorkspacePanel.template().(workspace.state)
+    assert dom_has_attr?(workspace_dom, "role", "dialog")
+
+    assert dom_has_attr?(
+             workspace_dom,
+             "aria-label",
+             "Workspace tools and developer inspector"
+           )
+
+    inspector = Assembly.action(:open_mobile_panel, %{panel: "inspector"}, component)
+    assert inspector.state.mobile_panel == "inspector"
+
+    inspector_dom = MobileWorkspacePanel.template().(inspector.state)
+
+    assert dom_has_attr?(
+             inspector_dom,
+             "aria-label",
+             "Workspace tools and developer inspector"
+           )
+
+    closed = Assembly.action(:close_mobile_panel, %{}, inspector)
+    assert closed.state.mobile_panel == ""
+  end
+
   test "persist_channel command creates a group chat and broadcasts it" do
     name = "hologram-test-#{System.unique_integer([:positive])}"
     server = %Server{cid: "page", instance_id: "channel-test", session_id: "session-test"}
@@ -353,7 +389,7 @@ defmodule Jido.Assembly.Pages.AssemblyTest do
                params: %{
                  room: room,
                  messages: [message],
-                 signal: %{type: "jido.messaging.room.created"}
+                 signal: %{type: "jido.chat.room.message"}
                }
              }
            ] = server.broadcasts
@@ -425,7 +461,7 @@ defmodule Jido.Assembly.Pages.AssemblyTest do
           room_id: @ops_room,
           messages: messages,
           agent_demo: component.state.agent_demo,
-          signal: %{type: "jido.messaging.room.message_added"}
+          signal: %{type: "jido.chat.room.message"}
         },
         component
       )
@@ -434,7 +470,7 @@ defmodule Jido.Assembly.Pages.AssemblyTest do
     assert component.state.agent_error == nil
     assert Enum.any?(component.state.messages, &(&1.id == List.first(messages).id))
     assert component.state.last_event.title == "Agent round stored"
-    assert component.state.last_event.layer == "Jido AI + Jido Messaging"
+    assert component.state.last_event.layer == "Jido AI + Jido Chat"
   end
 
   defp message_view(room_id, overrides \\ []) do

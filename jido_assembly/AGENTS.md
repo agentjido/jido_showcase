@@ -1,8 +1,8 @@
 # Jido Assembly Agent Guide
 
 This package is a developer-level spike for a Slack-like Jido chat workspace.
-It uses Hologram as the UI layer, Phoenix as the web shell, `jido_messaging`
-for durable chat primitives, SQLite for local persistence, Jido Signal-style
+It uses Hologram as the UI layer, Phoenix as the web shell, Jido Chat V3 for
+durable Rooms and provider bridges, SQLite for local persistence, Jido Signal
 events for UI updates, and Phoenix Presence for online state.
 
 ## Intent
@@ -18,12 +18,12 @@ events for UI updates, and Phoenix Presence for online state.
 - `app/` is the Hologram surface: pages, components, client reducers, and server
   commands.
 - `lib/jido_assembly/` is the app backend: chat context, read projections,
-  mentions, seeds, messaging integration, Presence adapter configuration, and
+  mentions, seeds, Runtime integration, Presence adapter configuration, and
   inspector data.
 - `lib/jido_assembly_web/` should stay thin: endpoint, router, Phoenix Presence,
   Hologram presence notifier, and presentation helpers at the web/UI boundary.
-- `jido_messaging` owns reusable messaging primitives, SQLite persistence, query
-  helpers, signal creation, and generic Presence integration.
+- Jido Chat owns reusable Room, connection, binding, bridge, Signal, and storage
+  contracts. Assembly owns the concrete SQLite adapter.
 - Assembly owns product-specific choices: Slack-like room lists, unread counts,
   demo users, seeded content, and UI read models.
 
@@ -38,7 +38,7 @@ events for UI updates, and Phoenix Presence for online state.
 - Use `Jido.Assembly.Chat.Projections` for room/message/person maps consumed by
   Hologram components.
 - Keep Phoenix Presence wiring behind `Jido.Assembly.Presence` and
-  `Jido.AssemblyWeb.Presence`; do not make `jido_messaging` depend on Phoenix.
+  `Jido.AssemblyWeb.Presence`; do not add Phoenix to Jido Chat core.
 - Seeds are acceptable here because this is a demo package. Keep them obvious,
   deterministic, and easy to reset.
 
@@ -47,7 +47,7 @@ events for UI updates, and Phoenix Presence for online state.
 - Run setup with `mix setup`.
 - Start the Hologram app with `mix holo`.
 - If port 4000 is already in use, run `PORT=4002 mix holo`.
-- Reset demo state by deleting `data/jido_assembly.sqlite3`.
+- Reset demo state by deleting `data/jido_assembly_v3.sqlite3`.
 - Before finishing code changes, run `mix test`, `mix compile --warnings-as-errors`,
   and `HOLOGRAM_START=1 mix compile --force` when Hologram modules changed.
 - Use `mix precommit` when the change set is broad enough to justify the full

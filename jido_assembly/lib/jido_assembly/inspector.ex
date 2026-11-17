@@ -6,7 +6,7 @@ defmodule Jido.Assembly.Inspector do
   demo is exercising without leaking UI commentary into command handlers.
   """
 
-  alias Jido.Chat.{MessagingTarget, PostPayload}
+  alias Jido.Chat.Post
 
   @workspace_id "jido"
 
@@ -17,14 +17,14 @@ defmodule Jido.Assembly.Inspector do
       role: "Client actions, server commands, and realtime broadcasts."
     },
     %{
-      name: "Jido Messaging",
+      name: "Jido Chat Runtime",
       badge: "runtime",
-      role: "Canonical rooms, messages, thread records, reactions, and committed signals."
+      role: "Managed Rooms, provider accounts, bindings, history, and reactions."
     },
     %{
       name: "Jido Signal",
       badge: "events",
-      role: "CloudEvents-compatible jido.messaging.* dispatch and routing."
+      role: "CloudEvents-compatible jido.chat.* commands and committed facts."
     },
     %{
       name: "SQLite",
@@ -32,7 +32,7 @@ defmodule Jido.Assembly.Inspector do
       role: "Small local persistence adapter backing the demo process."
     },
     %{
-      name: "Jido Chat",
+      name: "Jido Chat Adapters",
       badge: "contract",
       role: "Typed adapter contracts for Telegram, Discord, and future providers."
     },
@@ -44,7 +44,7 @@ defmodule Jido.Assembly.Inspector do
   ]
 
   @capabilities [
-    %{feature: "Channels", status: "implemented", detail: "Group rooms in jido_messaging."},
+    %{feature: "Channels", status: "implemented", detail: "Durable Jido Chat Room records."},
     %{feature: "DMs", status: "implemented", detail: "Direct rooms with demo participants."},
     %{feature: "Threads", status: "implemented", detail: "Root message plus reply records."},
     %{feature: "Reactions", status: "implemented", detail: "Stored on message reaction maps."},
@@ -140,37 +140,34 @@ defmodule Jido.Assembly.Inspector do
     |> Map.put(:delivery_text, inspect(inspector.delivery, pretty: true, limit: 20))
   end
 
-  defp chat_contract(room) do
-    target =
-      MessagingTarget.for_room(room.id,
-        kind: target_kind(room),
-        channel_type: :assembly,
-        instance_id: @workspace_id
-      )
+  defp chat_contract(nil), do: []
 
-    payload =
-      PostPayload.text("Message #{room_label(room)}",
-        metadata: %{workspace_id: @workspace_id, room_id: room.id, source: "jido_assembly"}
+  defp chat_contract(room) do
+    post =
+      Post.text("Message #{room_label(room)}",
+        metadata: %{"workspace_id" => @workspace_id, "room_id" => room.id}
       )
 
     [
       %{
-        label: "Target",
-        value: "#{target.kind} #{target.external_id}",
-        detail: "Jido.Chat.MessagingTarget"
+        label: "Room",
+        value: "#{room.kind} #{room.id}",
+        detail: "Jido.Chat.Runtime.Room.Record"
       },
       %{
         label: "Payload",
-        value: Atom.to_string(payload.kind),
-        detail: "Jido.Chat.PostPayload"
+        value: Post.fallback_text(post),
+        detail: "Jido.Chat.Post"
       },
       %{
         label: "Write path",
-        value: "post_message",
-        detail: "SQLite commit plus jido.messaging.* signal"
+        value: "Jido.call",
+        detail: "SQLite commit plus jido.chat.room.message fact"
       }
     ]
   end
+
+  defp room_metrics(nil, _message_count, _thread_count), do: []
 
   defp room_metrics(room, message_count, thread_count) do
     [
@@ -182,8 +179,6 @@ defmodule Jido.Assembly.Inspector do
     ]
   end
 
-  defp target_kind(%{kind: "dm"}), do: :dm
-  defp target_kind(_room), do: :room
-
+  defp room_label(nil), do: "No Room"
   defp room_label(room), do: "#{room.prefix}#{room.name}"
 end

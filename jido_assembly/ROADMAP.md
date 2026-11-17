@@ -15,12 +15,12 @@ Implemented now:
 - Responsive chat shell with desktop sidebar and mobile room switcher
 - Composer, demo user switcher, room switching, unread counters, desktop thread
   panel, and mobile thread drawer
-- Developer inspector that makes the Hologram, `jido_messaging`, SQLite,
-  `jido_chat`, and Jido responsibilities visible in the UI
+- Developer inspector that makes the Hologram, Jido Chat Runtime, SQLite,
+  adapters, and Jido responsibilities visible in the UI
 - Mentions, reactions, lightweight thread replies, and message search
-- Canonical rooms, participants, messages, reactions, and threads stored through
-  `jido_messaging`
-- SQLite durability through upstream `Jido.Messaging.Persistence.SQLite`
+- Canonical Rooms, memberships, messages, reactions, and threads stored through
+  Jido Chat Runtime
+- SQLite durability through the Assembly storage adapter
 - Hologram action/command tests for core page behavior
 - Assembly guard test confirming it uses upstream SQLite persistence
 
@@ -60,7 +60,7 @@ compete there directly unless Jido needs a specific enterprise integration path.
 After the developer demo, Assembly should become an agent-native team chat and
 bridge console:
 
-- Chat rooms are the human interface to Jido Messaging.
+- Chat Rooms are the human interface to Jido agents and workflows.
 - Agents can participate as first-class room members.
 - External providers can be bridged into canonical rooms without the UI owning
   provider-specific message shapes.
@@ -71,12 +71,12 @@ bridge console:
 
 ## Phase 0: Developer Demo Hardening
 
-Goal: keep the current Hologram plus `jido_messaging` demo readable, durable,
+Goal: keep the current Hologram plus Jido Chat V3 demo readable, durable,
 and reliable for 5-10 local users.
 
 - Keep Hologram UI state isolated from messaging persistence.
-- Keep SQLite durability in `jido_messaging`; Assembly should consume it through
-  its app-specific chat context.
+- Keep SQLite durability behind the Jido Chat storage contract and Assembly chat
+  context.
 - Keep tests layered: Chat context ExUnit, Hologram action/command ExUnit,
   Playwright for browser/realtime/mobile.
 - Decide how feature tests should start Hologram with the Assembly patch/prune
@@ -143,7 +143,7 @@ Goal: make Assembly more useful than a clone for Jido users.
 - Adapter bridge dashboard in the room context panel: connected providers,
   delivery state, inbound/outbound event IDs, retry controls.
 - Cross-provider rooms: Slack channel plus Discord channel plus native Assembly
-  room mapped into one canonical `jido_messaging` room.
+  Room mapped into one canonical Jido Chat Room.
 - Summaries and handoffs: daily room summary, unresolved questions, decisions,
   extracted tasks, and "what changed since I left".
 

@@ -1,7 +1,7 @@
 defmodule Jido.Assembly.ChatTest do
   use ExUnit.Case, async: false
 
-  alias Jido.Assembly.{Chat, Messaging, Seeds}
+  alias Jido.Assembly.{Chat, ChatRuntime, Seeds}
 
   @ops_room "room:ops-workflow"
 
@@ -24,32 +24,26 @@ defmodule Jido.Assembly.ChatTest do
 
     stack_names = Enum.map(inspector.stack, & &1.name)
     assert "Hologram" in stack_names
-    assert "Jido Messaging" in stack_names
+    assert "Jido Chat Runtime" in stack_names
     assert "Jido Signal" in stack_names
-    assert "Jido Chat" in stack_names
+    assert "Jido Chat Adapters" in stack_names
     assert "Jido" in stack_names
 
-    assert Enum.any?(inspector.chat_contract, &(&1.detail == "Jido.Chat.MessagingTarget"))
+    assert Enum.any?(inspector.chat_contract, &(&1.detail == "Jido.Chat.Runtime.Room.Record"))
     assert Enum.any?(inspector.capabilities, &(&1.feature == "Threads"))
     assert Enum.any?(inspector.capabilities, &(&1.feature == "Signals"))
   end
 
-  test "boot seeding removes legacy showcase rooms from upgraded databases" do
-    assert {:ok, _room} =
-             Messaging.create_room(%{
-               id: "room:general",
-               type: :channel,
-               name: "general",
-               metadata: %{workspace_id: Chat.workspace_id(), assembly_kind: "channel"}
-             })
-
-    Seeds.ensure_seeded!()
-
-    assert {:error, :not_found} = Messaging.get_room("room:general")
+  test "boot seeding is idempotent and keeps durable V3 Rooms" do
+    assert :ok = Seeds.ensure_seeded!()
+    assert :ok = Seeds.ensure_seeded!()
+    assert {:ok, room} = ChatRuntime.get_room(@ops_room)
+    assert room.metadata["source_key"] == "seed/room/room:ops-workflow"
+    assert {:ok, %{state: :running}} = ChatRuntime.room_runtime_status(@ops_room)
     assert Enum.any?(Chat.snapshot().channels, &(&1.id == @ops_room))
   end
 
-  test "send_message persists through jido_messaging" do
+  test "send_message persists through the Jido Chat Runtime" do
     body = "test message #{System.unique_integer([:positive])}"
 
     assert {:ok, message} = Chat.send_message(@ops_room, body)
@@ -77,8 +71,8 @@ defmodule Jido.Assembly.ChatTest do
     assert message.author == "Maggie"
     assert "user:priya" in message.mentioned_user_ids
 
-    assert {:ok, persisted_message} = Jido.Assembly.Messaging.get_message(message.id)
-    assert persisted_message.metadata.mention_handles == ["priya"]
+    assert {:ok, record} = ChatRuntime.get_room_history(@ops_room, message.id)
+    assert Chat.message_record(record).metadata["mention_handles"] == ["priya"]
   end
 
   test "send_message resolves agent mentions through persisted participants" do
@@ -87,8 +81,8 @@ defmodule Jido.Assembly.ChatTest do
     assert {:ok, message} = Chat.send_message(@ops_room, body, "user:you")
     assert "agent:triage" in message.mentioned_user_ids
 
-    assert {:ok, persisted_message} = Jido.Assembly.Messaging.get_message(message.id)
-    assert persisted_message.metadata.mention_handles == ["triage"]
+    assert {:ok, record} = ChatRuntime.get_room_history(@ops_room, message.id)
+    assert Chat.message_record(record).metadata["mention_handles"] == ["triage"]
   end
 
   test "toggle_reaction persists reaction state on messages" do
@@ -111,64 +105,42 @@ defmodule Jido.Assembly.ChatTest do
     assert unreacted.reactions == []
   end
 
-  test "writes emit jido_messaging signals with a legacy PubSub mirror" do
+  test "writes emit committed V3 facts on the Runtime Bus" do
     room_id = @ops_room
-    :ok = Jido.Assembly.Messaging.subscribe(room_id)
-    {:ok, subscription_id} = Jido.Assembly.Messaging.subscribe_signals("jido.messaging.**")
+    {:ok, message_subscription} = ChatRuntime.subscribe_runtime("jido.chat.room.message")
+    {:ok, reaction_subscription} = ChatRuntime.subscribe_runtime("jido.chat.reaction.*")
 
     body = "event target #{System.unique_integer([:positive])}"
-    assert {:ok, message, [message_signal]} = Chat.send_message_command(room_id, body)
 
-    assert message_signal.type == "jido.messaging.room.message_added"
-    assert message_signal.subject == room_id
-    assert message_signal.data["payload"]["text"] == body
-    assert message_signal.data["platform"]["channel_type"] == "assembly"
-    assert message_signal.data["target"]["instance_id"] == Chat.workspace_id()
-    refute Map.has_key?(message_signal.data["platform"], "bridge_id")
+    assert {:ok, message, [message_signal, command_reply]} =
+             Chat.send_message_command(room_id, body)
+
+    assert message_signal.type == "jido.chat.room.message"
+    assert message_signal.id == message.id
+    assert command_reply.type == "jido.chat.room.posted"
 
     assert_receive {:signal, received_message_signal}
-    assert received_message_signal.type == "jido.messaging.room.message_added"
-    assert received_message_signal.data["message_id"] == message.id
+    assert received_message_signal.type == "jido.chat.room.message"
+    assert received_message_signal.id == message.id
 
-    assert_receive {:message_added, raw_message}
-    assert raw_message.id == message.id
-
-    assert {:ok, reacted, [reaction_signal]} =
+    assert {:ok, reacted, [_reaction_reply]} =
              Chat.toggle_reaction_command(message.id, "+1", "user:maggie")
 
-    assert reaction_signal.type == "jido.messaging.message.reaction_added"
-    assert reaction_signal.data["participant_id"] == "user:maggie"
-
-    assert_receive {:reaction_added,
-                    %{
-                      message_id: message_id,
-                      participant_id: "user:maggie",
-                      reaction: "+1",
-                      message: reacted_message
-                    }}
-
-    assert message_id == reacted.id
-    assert reacted_message.reactions["+1"] == ["user:maggie"]
     assert_receive {:signal, received_reaction_signal}
-    assert received_reaction_signal.type == "jido.messaging.message.reaction_added"
+    assert received_reaction_signal.type == "jido.chat.reaction.added"
+    assert received_reaction_signal.data["message_id"] == reacted.id
+    assert received_reaction_signal.data["actor_id"] == "user:maggie"
 
     assert {:ok, _unreacted, [remove_signal]} =
              Chat.toggle_reaction_command(message.id, "+1", "user:maggie")
 
-    assert remove_signal.type == "jido.messaging.message.reaction_removed"
-
-    assert_receive {:reaction_removed,
-                    %{
-                      message_id: ^message_id,
-                      participant_id: "user:maggie",
-                      reaction: "+1"
-                    }}
+    assert remove_signal.type == "jido.chat.room.reaction.changed"
 
     assert_receive {:signal, received_remove_signal}
-    assert received_remove_signal.type == "jido.messaging.message.reaction_removed"
+    assert received_remove_signal.type == "jido.chat.reaction.removed"
 
-    :ok = Jido.Assembly.Messaging.unsubscribe_signals(subscription_id)
-    :ok = Jido.Assembly.Messaging.unsubscribe(room_id)
+    :ok = ChatRuntime.unsubscribe_runtime(message_subscription)
+    :ok = ChatRuntime.unsubscribe_runtime(reaction_subscription)
   end
 
   test "thread replies are listed under the root message" do

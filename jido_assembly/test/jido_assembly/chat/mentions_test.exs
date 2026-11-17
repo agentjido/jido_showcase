@@ -3,7 +3,6 @@ defmodule Jido.Assembly.Chat.MentionsTest do
 
   alias Jido.Assembly.Chat
   alias Jido.Assembly.Chat.Mentions
-  alias Jido.Assembly.Messaging
 
   setup do
     Chat.ensure_seeded!()
@@ -26,19 +25,15 @@ defmodule Jido.Assembly.Chat.MentionsTest do
     participant_id = "user:dev-#{suffix}"
     handle = "dev#{suffix}"
 
-    assert {:ok, _participant} =
-             Messaging.create_participant(%{
-               id: participant_id,
-               type: :human,
-               identity: %{name: "Developer #{suffix}", handle: handle},
-               presence: :online,
-               capabilities: [:text]
-             })
+    participants = [%{id: participant_id, name: "Developer #{suffix}", handle: handle}]
 
     assert %{
              mentions: [^participant_id],
              mention_handles: [^handle]
-           } = Mentions.metadata("Can @#{String.upcase(handle)} and @#{handle} review this?")
+           } =
+             Mentions.metadata("Can @#{String.upcase(handle)} and @#{handle} review this?",
+               participants: participants
+             )
   end
 
   test "ignores email addresses and system handles" do

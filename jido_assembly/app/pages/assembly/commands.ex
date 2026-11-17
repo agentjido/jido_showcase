@@ -22,14 +22,14 @@ defmodule Jido.Assembly.Pages.Assembly.Commands do
     user_id = Map.get(params, :user_id, Chat.current_user_id())
     room_id = Map.get(params, :room_id, Chat.default_room_id())
 
-    case Chat.touch_presence(user_id, room_id, session_id: server.session_id) do
+    case Chat.touch_presence(user_id, room_id, session_id: presence_session_id(server)) do
       {:ok, presence, signals} ->
         put_workspace_action(server, :presence_changed, %{
           presence: presence,
           signal:
             SignalPresenter.summary(signals, [
-              "jido.messaging.participant.presence_changed",
-              "jido.messaging.room.participant_joined"
+              "jido.assembly.presence.changed",
+              "jido.assembly.presence.joined"
             ])
         })
 
@@ -50,7 +50,7 @@ defmodule Jido.Assembly.Pages.Assembly.Commands do
           room_id: message.room_id,
           message: message,
           connector_snapshot: Chat.connector_snapshot(message.room_id),
-          signal: SignalPresenter.summary(signals, "jido.messaging.room.message_added")
+          signal: SignalPresenter.summary(signals, "jido.chat.room.message")
         })
 
       {:error, reason} ->
@@ -68,7 +68,7 @@ defmodule Jido.Assembly.Pages.Assembly.Commands do
           room_id: message.room_id,
           message: message,
           connector_snapshot: Chat.connector_snapshot(message.room_id),
-          signal: SignalPresenter.summary(signals, "jido.messaging.room.message_added")
+          signal: SignalPresenter.summary(signals, "jido.chat.room.message")
         })
 
       {:error, reason} ->
@@ -100,7 +100,7 @@ defmodule Jido.Assembly.Pages.Assembly.Commands do
           room_id: result.room_id,
           messages: result.messages,
           agent_demo: Agents.snapshot(),
-          signal: SignalPresenter.summary(result.signals, "jido.messaging.room.message_added")
+          signal: SignalPresenter.summary(result.signals, "jido.chat.room.message")
         })
 
       {:error, reason} ->
@@ -125,7 +125,7 @@ defmodule Jido.Assembly.Pages.Assembly.Commands do
             room_id: prompt_message.room_id,
             message: prompt_message,
             connector_snapshot: Chat.connector_snapshot(prompt_message.room_id),
-            signal: SignalPresenter.summary(prompt_signals, "jido.messaging.room.message_added")
+            signal: SignalPresenter.summary(prompt_signals, "jido.chat.room.message")
           })
 
         case Agents.run_round(params.room_id,
@@ -141,7 +141,7 @@ defmodule Jido.Assembly.Pages.Assembly.Commands do
               round_limit: result.round_limit,
               messages: result.messages,
               agent_demo: Agents.snapshot(),
-              signal: SignalPresenter.summary(result.signals, "jido.messaging.room.message_added")
+              signal: SignalPresenter.summary(result.signals, "jido.chat.room.message")
             })
 
           {:error, reason} ->
@@ -166,12 +166,16 @@ defmodule Jido.Assembly.Pages.Assembly.Commands do
         put_workspace_action(server, :room_created, %{
           room: room,
           messages: messages,
-          signal: SignalPresenter.summary(signals, "jido.messaging.room.created")
+          signal: SignalPresenter.summary(signals, "jido.chat.room.message")
         })
 
       {:error, reason} ->
         put_action(server, :room_create_failed, error: Chat.error_to_string(reason))
     end
+  end
+
+  defp presence_session_id(server) do
+    Enum.join([server.session_id, server.instance_id], ":")
   end
 
   defp put_workspace_action(server, action, params) do

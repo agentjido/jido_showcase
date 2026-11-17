@@ -6,6 +6,7 @@ defmodule Jido.Assembly.Pages.Assembly do
   alias Jido.Assembly.Components.Assembly.{
     ChatPanel,
     DeveloperInspectorPanel,
+    MobileWorkspacePanel,
     Rail,
     Sidebar,
     ThreadPanel
@@ -78,15 +79,33 @@ defmodule Jido.Assembly.Pages.Assembly do
   end
 
   def action(:select_user, params, component) do
-    put_command(component, :load_snapshot,
+    component
+    |> put_state(:mobile_panel, "")
+    |> put_command(:load_snapshot,
       user_id: params.id,
       active_room_id: component.state.active_room_id
     )
   end
 
+  def action(:open_mobile_panel, params, component) do
+    panel = if params.panel == "inspector", do: "inspector", else: "workspace"
+
+    JS.exec(
+      "requestAnimationFrame(() => document.getElementById('assembly-mobile-panel')?.focus());"
+    )
+
+    put_state(component, :mobile_panel, panel)
+  end
+
+  def action(:close_mobile_panel, _params, component) do
+    focus_mobile_trigger(component.state.mobile_panel)
+    put_state(component, :mobile_panel, "")
+  end
+
   def action(:snapshot_loaded, params, component) do
     component
     |> State.apply_snapshot(params.snapshot)
+    |> put_state(:mobile_panel, "")
     |> put_state(:thread_open, false)
     |> put_state(:thread_root, nil)
     |> put_state(:thread_messages, [])
@@ -428,6 +447,7 @@ defmodule Jido.Assembly.Pages.Assembly do
     |> put_state(:new_room_topic, "")
     |> put_state(:new_room_pending, false)
     |> put_state(:new_room_error, nil)
+    |> put_state(:mobile_panel, "")
     |> State.put_active_developer_context(
       State.developer_event(
         "Room created",
@@ -473,7 +493,7 @@ defmodule Jido.Assembly.Pages.Assembly do
     |> State.put_active_developer_context(
       State.developer_event(
         "Agent round stored",
-        "Jido AI + Jido Messaging",
+        "Jido AI + Jido Chat",
         signal_detail(params, "#{Enum.count(messages)} agent messages")
       )
     )
@@ -551,7 +571,29 @@ defmodule Jido.Assembly.Pages.Assembly do
           developer_stack={@developer_stack}
           connector_snapshot={@connector_snapshot}
           last_event={@last_event}
+          presence={@presence}
           thread_open={@thread_open}
+        />
+        <MobileWorkspacePanel
+          active_room_id={@active_room_id}
+          connector_snapshot={@connector_snapshot}
+          current_user={@current_user}
+          demo_users={@demo_users}
+          developer_contract={@developer_contract}
+          developer_message_inspector={@developer_message_inspector}
+          developer_room_metrics={@developer_room_metrics}
+          developer_stack={@developer_stack}
+          last_event={@last_event}
+          mobile_panel={@mobile_panel}
+          new_room_error={@new_room_error}
+          new_room_name={@new_room_name}
+          new_room_pending={@new_room_pending}
+          new_room_topic={@new_room_topic}
+          presence={@presence}
+          room_form_open={@room_form_open}
+          rooms={@rooms}
+          search_query={@search_query}
+          search_results={@search_results}
         />
       </div>
     </main>
@@ -670,5 +712,13 @@ defmodule Jido.Assembly.Pages.Assembly do
     target?.scrollIntoView({ block: "nearest" });
     target?.focus({ preventScroll: true });
     """)
+  end
+
+  defp focus_mobile_trigger("inspector") do
+    JS.exec("document.getElementById('assembly-mobile-inspector-trigger')?.focus();")
+  end
+
+  defp focus_mobile_trigger(_panel) do
+    JS.exec("document.getElementById('assembly-mobile-workspace-trigger')?.focus();")
   end
 end

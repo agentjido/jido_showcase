@@ -1,7 +1,7 @@
 defmodule Jido.Assembly.AgentsTest do
   use ExUnit.Case, async: false
 
-  alias Jido.Assembly.{Agents, Chat, Messaging}
+  alias Jido.Assembly.{Agents, Chat, ChatRuntime}
 
   @ops_room "room:ops-workflow"
   @agent_names ["Triage Agent", "Bridge Agent", "Runbook Agent"]
@@ -9,13 +9,16 @@ defmodule Jido.Assembly.AgentsTest do
 
   setup do
     app_key = Application.get_env(:req_llm, :anthropic_api_key)
+    agent_mode = Application.get_env(:jido_assembly, :agent_mode)
     env_key = System.get_env("ANTHROPIC_API_KEY")
 
     Application.delete_env(:req_llm, :anthropic_api_key)
+    Application.put_env(:jido_assembly, :agent_mode, :live)
     System.delete_env("ANTHROPIC_API_KEY")
 
     on_exit(fn ->
       restore_app_key(app_key)
+      restore_agent_mode(agent_mode)
       restore_env_key(env_key)
     end)
 
@@ -34,6 +37,25 @@ defmodule Jido.Assembly.AgentsTest do
 
   test "run_round refuses to run without an Anthropic API key" do
     assert {:error, :missing_api_key} = Agents.run_round(@ops_room)
+  end
+
+  test "scripted mode enables deterministic browser Agent rounds without a live key" do
+    Application.put_env(:jido_assembly, :agent_mode, :scripted)
+    {room, prompt} = prompted_room!("Prove the scripted browser path.")
+
+    snapshot = Agents.snapshot()
+    assert snapshot.enabled
+    refute snapshot.missing_api_key
+    assert snapshot.model == "scripted:jido-assembly-demo"
+
+    assert {:ok, result} =
+             Agents.run_round(room.id,
+               prompt_message_id: prompt.id,
+               safety_enabled: true
+             )
+
+    assert Enum.count(result.messages) == 3
+    assert Enum.all?(result.messages, &String.contains?(&1.body, "scripted V3 path"))
   end
 
   test "run_round requires the safety cap even with a test responder" do
@@ -64,17 +86,19 @@ defmodule Jido.Assembly.AgentsTest do
     assert result.prompt_message_id == prompt.id
     assert result.round_index == 1
     assert result.round_limit == 2
-    assert Enum.count(result.signals) == 3
+    assert Enum.count(result.signals) == 6
+    assert Enum.count(result.signals, &(&1.type == "jido.chat.room.message")) == 3
 
     for message <- result.messages do
       assert message.room_id == room.id
       assert message.sender_id in @agent_ids
 
-      assert {:ok, persisted} = Messaging.get_message(message.id)
+      assert {:ok, record} = ChatRuntime.get_room_history(room.id, message.id)
+      persisted = Chat.message_record(record)
       assert persisted.role == :assistant
-      assert persisted.metadata.source == "jido_ai"
-      assert is_binary(persisted.metadata.agent_round_id)
-      assert persisted.metadata.agent_prompt_message_id == prompt.id
+      assert persisted.metadata["source"] == "jido"
+      assert is_binary(persisted.metadata["agent_round_id"])
+      assert persisted.metadata["agent_prompt_message_id"] == prompt.id
     end
 
     assert Enum.any?(
@@ -181,6 +205,9 @@ defmodule Jido.Assembly.AgentsTest do
 
   defp restore_app_key(nil), do: Application.delete_env(:req_llm, :anthropic_api_key)
   defp restore_app_key(value), do: Application.put_env(:req_llm, :anthropic_api_key, value)
+
+  defp restore_agent_mode(nil), do: Application.delete_env(:jido_assembly, :agent_mode)
+  defp restore_agent_mode(value), do: Application.put_env(:jido_assembly, :agent_mode, value)
 
   defp restore_env_key(nil), do: System.delete_env("ANTHROPIC_API_KEY")
   defp restore_env_key(value), do: System.put_env("ANTHROPIC_API_KEY", value)

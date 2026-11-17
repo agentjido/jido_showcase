@@ -10,6 +10,7 @@ defmodule Jido.Assembly.Components.Assembly.DeveloperInspectorPanel do
   prop :developer_room_metrics, :list
   prop :developer_stack, :list
   prop :last_event, :map
+  prop :presence, :map
   prop :thread_open, :boolean
 
   def template do
@@ -30,6 +31,14 @@ defmodule Jido.Assembly.Components.Assembly.DeveloperInspectorPanel do
                   <span class="font-semibold text-stone-700">{metric.value}</span>
                 </div>
               {/for}
+              <div class="flex items-center justify-between rounded-md border border-[var(--assembly-line)] bg-[var(--assembly-panel)] px-3 py-2 text-sm">
+                <span>Online users</span>
+                <span class="font-semibold text-stone-700">{Enum.count(@presence.online_user_ids)}</span>
+              </div>
+              <div class="flex items-center justify-between rounded-md border border-[var(--assembly-line)] bg-[var(--assembly-panel)] px-3 py-2 text-sm">
+                <span>Browser sessions</span>
+                <span class="font-semibold text-stone-700">{Enum.count(@presence.sessions)}</span>
+              </div>
             </div>
           </section>
 

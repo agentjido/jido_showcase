@@ -1,13 +1,12 @@
 defmodule Jido.Assembly.Chat.Mentions do
   @moduledoc """
-  Resolves Assembly-local `@handle` mentions against persisted participants.
+  Resolves Assembly-local `@handle` mentions against host-owned profiles.
 
-  `jido_messaging` owns participant storage. Assembly owns the workspace handle
-  syntax and projects resolved user IDs into message metadata for the demo UI.
+  Jido Chat stores member identities. Assembly owns display profiles, handle
+  syntax, and the user IDs used by its UI.
   """
 
-  alias Jido.Assembly.Messaging
-  alias Jido.Chat.Mention
+  alias Jido.Assembly.Seeds
 
   @handle_pattern ~r/(?:^|[^\p{L}\p{N}_])@([A-Za-z][A-Za-z0-9_]*(?:[.-][A-Za-z0-9_]+)*)/u
   @default_limit 500
@@ -79,26 +78,20 @@ defmodule Jido.Assembly.Chat.Mentions do
   defp participants(opts) do
     limit = Keyword.get(opts, :limit, @default_limit)
 
-    case Messaging.directory_search(:participant, %{}, limit: limit) do
-      {:ok, participants} -> Enum.filter(participants, &mentionable?/1)
-      {:error, _reason} -> []
-    end
+    opts
+    |> Keyword.get_lazy(:participants, fn -> Seeds.demo_users() ++ Seeds.agent_people() end)
+    |> Enum.take(limit)
   end
 
-  defp mentionable?(participant), do: participant.type in [:human, :agent]
-
   defp participant_handles(participant) do
-    identity = participant.identity || %{}
-    metadata = participant.metadata || %{}
+    metadata = Map.get(participant, :metadata, %{})
 
     [
-      metadata_value(identity, :handle),
+      Map.get(participant, :handle),
       metadata_value(metadata, :handle),
-      first_name(metadata_value(identity, :name)),
-      first_name(metadata_value(identity, :display_name)),
+      first_name(Map.get(participant, :name)),
       participant.id
     ]
-    |> Kernel.++(List.wrap(metadata_value(identity, :mention_handles)))
     |> Kernel.++(List.wrap(metadata_value(metadata, :mention_handles)))
     |> Enum.map(&normalize_handle/1)
     |> Enum.reject(&(&1 == ""))
@@ -106,15 +99,13 @@ defmodule Jido.Assembly.Chat.Mentions do
   end
 
   defp to_mention(token, participant) do
-    identity = participant.identity || %{}
-
-    Mention.new(%{
+    %{
       user_id: participant.id,
       username: token.handle,
-      display_name: metadata_value(identity, :name),
+      display_name: participant.name,
       mention_text: token.mention_text,
       metadata: %{offset: token.offset, length: token.length}
-    })
+    }
   end
 
   defp user_ids_from_mentions(mentions) do
@@ -131,7 +122,7 @@ defmodule Jido.Assembly.Chat.Mentions do
     |> Enum.uniq()
   end
 
-  defp mention_offset(%Mention{metadata: metadata}) do
+  defp mention_offset(%{metadata: metadata}) do
     metadata[:offset] || metadata["offset"] || 0
   end
 

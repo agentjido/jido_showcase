@@ -10,15 +10,7 @@ import Config
 config :jido_assembly,
   namespace: Jido.Assembly,
   generators: [timestamp_type: :utc_datetime],
-  sqlite_path: "data/jido_assembly.sqlite3"
-
-config :jido_ai,
-  model_aliases: %{
-    assembly_haiku: "anthropic:claude-haiku-4-5"
-  },
-  llm_defaults: %{
-    text: %{model: :assembly_haiku, temperature: 0.45, max_tokens: 220, timeout: 30_000}
-  }
+  sqlite_path: "data/jido_assembly_v3.sqlite3"
 
 # Configure the endpoint
 config :jido_assembly, Jido.AssemblyWeb.Endpoint,

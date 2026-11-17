@@ -12,9 +12,9 @@ defmodule Jido.AssemblyWeb.PresenceNotifier do
   alias Jido.AssemblyWeb.SignalPresenter
 
   @signal_priority [
-    "jido.messaging.participant.presence_changed",
-    "jido.messaging.room.participant_left",
-    "jido.messaging.room.participant_joined"
+    "jido.assembly.presence.changed",
+    "jido.assembly.presence.left",
+    "jido.assembly.presence.joined"
   ]
 
   def notify(_event, presence, signals) do

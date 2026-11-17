@@ -1,39 +1,47 @@
 defmodule Jido.Assembly.BridgesTest do
   use ExUnit.Case, async: false
 
-  alias Jido.Assembly.{Bridges, Chat, Messaging}
+  alias Jido.Assembly.{Bridges, Chat, ChatRuntime}
 
   setup do
-    reset_connector_configs()
+    assert {:ok, _snapshot} =
+             Bridges.ensure_ops_room!(Chat.default_room_id(),
+               env_fun: env(%{}),
+               listener_mode: :passive
+             )
 
     on_exit(fn ->
-      reset_connector_configs()
+      _ =
+        Bridges.ensure_ops_room!(Chat.default_room_id(),
+          env_fun: env(%{}),
+          listener_mode: :passive
+        )
     end)
 
     :ok
   end
 
-  test "boot setup keeps connectors in demo mode when credentials are absent" do
+  test "boot setup keeps durable provider declarations stopped in demo mode" do
     room_id = unique_room!()
 
     assert {:ok, snapshot} =
-             Bridges.ensure_ops_room!(room_id, env_fun: env(%{}), reconcile?: false)
+             Bridges.ensure_ops_room!(room_id, env_fun: env(%{}), listener_mode: :passive)
 
     assert snapshot.headline == "Demo connectors"
     assert snapshot.live_count == 0
     assert Enum.map(snapshot.connectors, & &1.mode) == ["demo", "demo"]
+    assert snapshot.routing_policy.delivery_mode == "broadcast"
 
-    assert {:ok, policy} = Messaging.get_routing_policy(room_id)
-    assert policy.delivery_mode == :broadcast
-    assert policy.failover_policy == :broadcast
-    assert policy.fallback_order == Bridges.bridge_ids()
-
-    assert {:ok, []} = Messaging.list_room_bindings(room_id)
-    assert {:ok, []} = Messaging.resolve_outbound_routes(room_id)
-    assert Bridges.delivery_metadata(:no_routes)["route_decision"] == "no_routes"
+    for account_id <- Bridges.bridge_ids() do
+      assert {:ok, declaration} = ChatRuntime.get_connection_declaration(account_id)
+      assert declaration.desired == :stopped
+      assert declaration.secret_refs["token"] in ["TELEGRAM_BOT_TOKEN", "DISCORD_BOT_TOKEN"]
+      assert {:ok, bindings} = ChatRuntime.list_bridge_bindings(account_id)
+      refute Enum.any?(bindings, & &1.enabled)
+    end
   end
 
-  test "boot setup creates live bridge configs, bindings, and broadcast routing from env" do
+  test "boot setup creates V3 bindings from environment references without storing tokens" do
     room_id = unique_room!()
 
     vars = %{
@@ -46,8 +54,7 @@ defmodule Jido.Assembly.BridgesTest do
     assert {:ok, snapshot} =
              Bridges.ensure_ops_room!(room_id,
                env_fun: env(vars),
-               listener_mode: :passive,
-               reconcile?: false
+               listener_mode: :passive
              )
 
     assert snapshot.headline == "Telegram + Discord live"
@@ -55,40 +62,31 @@ defmodule Jido.Assembly.BridgesTest do
 
     telegram = Enum.find(snapshot.connectors, &(&1.id == "telegram"))
     discord = Enum.find(snapshot.connectors, &(&1.id == "discord"))
-
-    assert telegram.mode == "live"
     assert telegram.target_label == "telegram-ops-room"
-    assert discord.mode == "live"
+    assert telegram.status == "configured"
     assert discord.target_label == "discord-ops-channel"
+    assert discord.status == "configured"
 
-    assert {:ok, telegram_config} = Messaging.get_bridge_config("assembly:telegram")
-    assert telegram_config.enabled
-    assert telegram_config.adapter_module == Jido.Chat.Telegram.Adapter
-    assert telegram_config.opts["target"] == "telegram-ops-room"
+    assert {:ok, telegram_declaration} =
+             ChatRuntime.get_connection_declaration("assembly:telegram")
 
-    assert {:ok, discord_config} = Messaging.get_bridge_config("assembly:discord")
-    assert discord_config.enabled
-    assert discord_config.adapter_module == Jido.Chat.Discord.Adapter
-    assert discord_config.opts["target"] == "discord-ops-channel"
+    assert telegram_declaration.definition_key == "assembly.telegram.v1"
+    assert telegram_declaration.secret_refs == %{"token" => "TELEGRAM_BOT_TOKEN"}
+    refute inspect(telegram_declaration) =~ "telegram-token"
 
-    assert {:ok, bindings} = Messaging.list_room_bindings(room_id)
-    assert Enum.count(bindings) == 2
+    assert {:ok, telegram_binding} =
+             ChatRuntime.get_bridge_binding("assembly:telegram", "telegram-ops-room")
 
-    assert Enum.any?(
-             bindings,
-             &(&1.channel == :telegram and &1.bridge_id == "assembly:telegram" and
-                 &1.external_room_id == "telegram-ops-room" and &1.direction == :both)
-           )
+    assert telegram_binding.room_id == room_id
+    assert telegram_binding.direction == :both
+    assert telegram_binding.enabled
 
-    assert Enum.any?(
-             bindings,
-             &(&1.channel == :discord and &1.bridge_id == "assembly:discord" and
-                 &1.external_room_id == "discord-ops-channel" and &1.direction == :both)
-           )
+    assert {:ok, discord_binding} =
+             ChatRuntime.get_bridge_binding("assembly:discord", "discord-ops-channel")
 
-    assert {:ok, routes} = Messaging.resolve_outbound_routes(room_id)
-    assert Enum.map(routes, & &1.bridge_id) == Bridges.bridge_ids()
-    assert Enum.map(routes, & &1.external_room_id) == ["telegram-ops-room", "discord-ops-channel"]
+    assert discord_binding.room_id == room_id
+    assert discord_binding.direction == :both
+    assert discord_binding.enabled
   end
 
   defp unique_room! do
@@ -101,13 +99,4 @@ defmodule Jido.Assembly.BridgesTest do
   end
 
   defp env(vars), do: fn key -> Map.get(vars, key) end
-
-  defp reset_connector_configs do
-    Enum.each(Bridges.bridge_ids(), fn bridge_id ->
-      _ = Messaging.delete_bridge_config(bridge_id)
-    end)
-
-    _ = Bridges.ensure_ops_room!(Chat.default_room_id(), env_fun: env(%{}), reconcile?: false)
-    :ok
-  end
 end

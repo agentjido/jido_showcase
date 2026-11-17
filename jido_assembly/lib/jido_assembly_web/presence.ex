@@ -3,7 +3,7 @@ defmodule Jido.AssemblyWeb.Presence do
   Phoenix Presence tracker for the Assembly demo workspace.
 
   Assembly keeps Phoenix-specific realtime process tracking here, outside
-  `jido_messaging`, so the messaging package stays transport agnostic.
+  Jido Chat Runtime, so online state stays separate from durable Room membership.
   """
 
   use Phoenix.Presence,
