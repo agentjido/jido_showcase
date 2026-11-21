@@ -138,10 +138,9 @@ Without `ANTHROPIC_API_KEY`, only live agent actions are disabled.
 
 ## Dependency Note
 
-Assembly uses the consolidated Jido V3 source revision, local Jido Chat V3, and
-local Telegram and Discord V3 adapters. Hologram remains the client and Phoenix
-remains the web shell. Assembly owns its SQLite storage adapter and online
-presence service.
+Assembly pins the Jido Chat V3 source revision that supplies the Telegram and
+Discord adapters. Assembly declares their transport dependencies, owns its SQLite
+storage adapter, and runs its online presence service.
 
 The Phoenix-generated `heroicons` asset dependency still uses Tailwind Labs'
 optimized SVG checkout from GitHub because `assets/vendor/heroicons.js` reads

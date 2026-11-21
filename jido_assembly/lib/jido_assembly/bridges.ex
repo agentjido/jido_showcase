@@ -12,6 +12,7 @@ defmodule Jido.Assembly.Bridges do
 
   alias Jido.Assembly.{ChatRuntime, Seeds}
   alias Jido.Chat.Runtime.Bridge.Binding
+  alias Jido.Chat.Runtime.Signal.Room.Join
 
   @connectors [
     %{
@@ -178,7 +179,8 @@ defmodule Jido.Assembly.Bridges do
     if live_ready?(connector, env_fun) do
       target = target(connector, env_fun)
 
-      with {:ok, bindings} <- ChatRuntime.list_bridge_bindings(connector.account_id),
+      with :ok <- ensure_room_membership(room_id, connector.account_id),
+           {:ok, bindings} <- ChatRuntime.list_bridge_bindings(connector.account_id),
            :ok <- disable_other_bindings(connector.account_id, bindings, target),
            do: ensure_binding(room_id, connector, target, bindings)
     else
@@ -186,6 +188,34 @@ defmodule Jido.Assembly.Bridges do
            :ok <- disable_other_bindings(connector.account_id, bindings, nil) do
         {:ok, nil}
       end
+    end
+  end
+
+  defp ensure_room_membership(room_id, account_id) do
+    with {:ok, member} <- ChatRuntime.connection_ref(account_id),
+         {:ok, membership} <- ChatRuntime.get_room_membership(room_id, member) do
+      case membership do
+        %{status: :active} -> :ok
+        _ -> join_room(room_id, member)
+      end
+    end
+  end
+
+  defp join_room(room_id, member) do
+    request = Join.new!(%{"member" => member})
+
+    with {:ok, address} <- Jido.agent_address(ChatRuntime.jido(), room_id),
+         {:ok, %Jido.AgentServer.TurnResult{status: :committed}} <-
+           Jido.call(ChatRuntime.jido(), address, request,
+             context: %{actor: Seeds.current_user_id()}
+           ) do
+      :ok
+    else
+      {:ok, %Jido.AgentServer.TurnResult{status: status, error: reason}} ->
+        {:error, {status, reason}}
+
+      {:error, _} = error ->
+        error
     end
   end
 
