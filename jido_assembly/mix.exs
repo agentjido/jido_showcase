@@ -55,7 +55,7 @@ defmodule Jido.Assembly.MixProject do
       {:jido_chat, path: "../../jido_chat", override: true},
       {:jido_chat_discord, path: "../../jido_chat_discord"},
       {:jido_chat_telegram, path: "../../jido_chat_telegram"},
-      {:exqlite, "~> 0.42.0"},
+      {:exqlite, "~> 0.43.0"},
       {:req_llm, "~> 1.30"},
       {:dotenvy, "~> 1.1"},
       {:lazy_html, "~> 0.1.12", only: :test},
