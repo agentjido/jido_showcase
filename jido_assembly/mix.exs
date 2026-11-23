@@ -61,7 +61,7 @@ defmodule Jido.Assembly.MixProject do
        github: "agentjido/jido_chat_discord", ref: "dad8f63dd93fc5e702f78c2e06796928487361ef"},
       {:jido_chat_telegram,
        github: "agentjido/jido_chat_telegram", ref: "2c1f08e15828fc32a85f06a0ff8eacc0993674e3"},
-      {:exqlite, "~> 0.42.0"},
+      {:exqlite, "~> 0.43.0"},
       {:req_llm, "~> 1.30"},
       {:dotenvy, "~> 1.1"},
       {:lazy_html, "~> 0.1.12", only: :test},
