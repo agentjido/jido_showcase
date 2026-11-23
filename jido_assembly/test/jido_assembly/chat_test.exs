@@ -119,25 +119,31 @@ defmodule Jido.Assembly.ChatTest do
     assert message_signal.id == message.id
     assert command_reply.type == "jido.chat.room.posted"
 
-    assert_receive {:signal, received_message_signal}
-    assert received_message_signal.type == "jido.chat.room.message"
-    assert received_message_signal.id == message.id
+    message_id = message.id
 
-    assert {:ok, reacted, [_reaction_reply]} =
-             Chat.toggle_reaction_command(message.id, "+1", "user:maggie")
+    assert_receive {:signal, %{type: "jido.chat.room.message", id: ^message_id}}, 1_000
 
-    assert_receive {:signal, received_reaction_signal}
-    assert received_reaction_signal.type == "jido.chat.reaction.added"
-    assert received_reaction_signal.data["message_id"] == reacted.id
-    assert received_reaction_signal.data["actor_id"] == "user:maggie"
+    assert {:ok, %{id: ^message_id}, [_reaction_reply]} =
+             Chat.toggle_reaction_command(message_id, "+1", "user:maggie")
+
+    assert_receive {:signal,
+                    %{
+                      type: "jido.chat.reaction.added",
+                      data: %{"message_id" => ^message_id, "actor_id" => "user:maggie"}
+                    }},
+                   1_000
 
     assert {:ok, _unreacted, [remove_signal]} =
-             Chat.toggle_reaction_command(message.id, "+1", "user:maggie")
+             Chat.toggle_reaction_command(message_id, "+1", "user:maggie")
 
     assert remove_signal.type == "jido.chat.room.reaction.changed"
 
-    assert_receive {:signal, received_remove_signal}
-    assert received_remove_signal.type == "jido.chat.reaction.removed"
+    assert_receive {:signal,
+                    %{
+                      type: "jido.chat.reaction.removed",
+                      data: %{"message_id" => ^message_id, "actor_id" => "user:maggie"}
+                    }},
+                   1_000
 
     :ok = ChatRuntime.unsubscribe_runtime(message_subscription)
     :ok = ChatRuntime.unsubscribe_runtime(reaction_subscription)
