@@ -1,11 +1,23 @@
 defmodule Jido.Assembly.Chat.Projections do
   @moduledoc "Assembly read models over durable Jido Chat V3 records."
 
-  alias Jido.Assembly.{ChatRuntime, Seeds}
+  alias Jido.Assembly.{AgentRuns, Bridges, ChatRuntime, ChatStorage, Pilot, ReleaseNotes, Seeds}
+  alias Jido.Assembly.Chat.{Attachments, Mentions, TextParts}
   alias Jido.Chat.Message
-  alias Jido.Chat.Runtime.Room.Reaction
+  alias Jido.Chat.Runtime.Room.{HistoryRecord, Reaction}
 
   @avatar_base_url "https://api.dicebear.com/10.x/lorelei/svg"
+
+  @history_page_size 50
+  @run_status %{
+    "queued" => "Queued",
+    "running" => "Running",
+    "ready" => "Preparing reply",
+    "waiting" => "Waiting for findings",
+    "completed" => "Completed",
+    "failed" => "Failed",
+    "cancelled" => "Cancelled"
+  }
 
   def avatar_url(person_id, name \\ nil) do
     seed =
@@ -17,11 +29,11 @@ defmodule Jido.Assembly.Chat.Projections do
     "#{@avatar_base_url}?seed=#{seed}"
   end
 
-  def room_views(presence \\ %{online_user_ids: []}) do
+  def room_views(presence \\ %{online_user_ids: []}, user_id \\ Seeds.current_user_id()) do
     case ChatRuntime.list_rooms(limit: 500) do
       {:ok, rooms} ->
         rooms
-        |> Enum.filter(&assembly_room?/1)
+        |> Enum.filter(&(assembly_room?(&1) and room_visible?(&1, user_id)))
         |> Enum.sort_by(&room_sort_key/1)
         |> Enum.map(&room_view(&1, presence))
 
@@ -29,6 +41,12 @@ defmodule Jido.Assembly.Chat.Projections do
         []
     end
   end
+
+  def room_visible?(%{kind: :direct, id: id}, user_id) do
+    match?({:ok, %{status: :active}}, ChatRuntime.get_room_membership(id, user_id))
+  end
+
+  def room_visible?(_room, _user_id), do: true
 
   def room_view(room, presence \\ %{online_user_ids: []}) do
     kind = room_kind(room)
@@ -73,40 +91,109 @@ defmodule Jido.Assembly.Chat.Projections do
 
   def room_message_data(room_id, user_id, presence \\ %{online_user_ids: []}) do
     case ChatRuntime.list_room_history(room_id, limit: 500) do
-      {:ok, history} ->
-        messages = Enum.map(history, &message_record/1)
-
-        reply_counts =
-          messages |> Enum.reject(&is_nil(&1.thread_id)) |> Enum.frequencies_by(& &1.thread_id)
-
-        timeline =
-          messages
-          |> Enum.filter(&is_nil(&1.thread_id))
-          |> Enum.map(&message_view(&1, user_id, Map.get(reply_counts, &1.id, 0), presence))
-
-        threads =
-          messages
-          |> Enum.reject(&is_nil(&1.thread_id))
-          |> Enum.group_by(& &1.thread_id)
-          |> Map.new(fn {thread_id, replies} ->
-            {thread_id, Enum.map(replies, &message_view(&1, user_id, 0, presence))}
-          end)
-
-        {timeline, threads}
-
-      {:error, _reason} ->
-        {[], %{}}
+      {:ok, history} -> project_history(room_id, history, user_id, presence)
+      {:error, _reason} -> {[], %{}}
     end
+  end
+
+  def history_page(room_id, user_id, presence, before) do
+    cursor_options = if before, do: [before: before], else: [latest: true]
+
+    with {:ok, records} <-
+           ChatRuntime.list_room_history(
+             room_id,
+             [limit: @history_page_size + 1] ++ cursor_options
+           ) do
+      records_page = Enum.take(records, -@history_page_size)
+      {messages, threads} = project_history(room_id, records_page, user_id, presence)
+
+      next_cursor =
+        if length(records) > @history_page_size do
+          hd(records_page).message_id
+        end
+
+      {:ok, %{messages: messages, threads: threads, before: next_cursor}}
+    end
+  end
+
+  def linked_history(room_id, message_id, user_id, presence) do
+    case ChatRuntime.get_room_history(room_id, message_id) do
+      {:ok, %HistoryRecord{thread_id: nil} = record} ->
+        {:ok, project_history(room_id, [record], user_id, presence)}
+
+      {:ok, %HistoryRecord{thread_id: root_id} = record} ->
+        with {:ok, %HistoryRecord{thread_id: nil} = root} <-
+               ChatRuntime.get_room_history(room_id, root_id),
+             {:ok, replies} <-
+               ChatRuntime.list_room_history(room_id,
+                 thread_id: root_id,
+                 latest: true,
+                 limit: @history_page_size
+               ) do
+          records =
+            [root, record | replies]
+            |> Enum.uniq_by(& &1.message_id)
+            |> Enum.sort_by(& &1.sequence)
+
+          {:ok, project_history(room_id, records, user_id, presence)}
+        else
+          _ -> {:error, :not_found}
+        end
+
+      _ ->
+        {:error, :not_found}
+    end
+  end
+
+  defp project_history(room_id, records, user_id, presence) do
+    counts = reply_counts(room_id)
+    messages = Enum.map(records, &message_record/1)
+
+    {roots, replies} = Enum.split_with(messages, &is_nil(&1.thread_id))
+    timeline = Enum.map(roots, &project_message(&1, user_id, counts, presence))
+
+    threads =
+      replies
+      |> Enum.group_by(& &1.thread_id)
+      |> Map.new(fn {root, entries} ->
+        {root, Enum.map(entries, &project_message(&1, user_id, counts, presence))}
+      end)
+
+    {timeline, threads}
+  end
+
+  defp reply_counts(room_id) do
+    case ChatStorage.thread_reply_counts(room_id) do
+      {:ok, counts} -> counts
+      {:error, _reason} -> %{}
+    end
+  end
+
+  defp project_message(%{thread_id: nil} = message, user_id, counts, presence) do
+    message_view(message, user_id, Map.get(counts, message.id, 0), presence)
+  end
+
+  defp project_message(message, user_id, counts, presence) do
+    message
+    |> message_view(user_id, 0, presence)
+    |> Map.put(:thread_reply_count, Map.get(counts, message.thread_id, 0))
   end
 
   @doc false
   def message_record(%Jido.Chat.Runtime.Room.HistoryRecord{} = record) do
     message = message_from_fact(record.signal)
 
+    sender_id =
+      case message.metadata["jido_chat_origin"] do
+        %{"account_id" => account_id} -> Bridges.external_actor_id(account_id, message.actor.id)
+        _other -> message.actor.id
+      end
+
     %{
       id: message.id,
+      sequence: record.sequence,
       room_id: message.room_id,
-      sender_id: message.actor.id,
+      sender_id: sender_id,
       role: message.role,
       content: message.content,
       metadata: message.metadata,
@@ -129,17 +216,7 @@ defmodule Jido.Assembly.Chat.Projections do
   end
 
   def message_view_with_reply_count(message, user_id, presence \\ %{online_user_ids: []}) do
-    reply_count =
-      if is_binary(message.thread_id) do
-        0
-      else
-        case ChatRuntime.list_room_history(message.room_id, thread_id: message.id, limit: 500) do
-          {:ok, replies} -> length(replies)
-          {:error, _reason} -> 0
-        end
-      end
-
-    message_view(message, user_id, reply_count, presence)
+    project_message(message, user_id, reply_counts(message.room_id), presence)
   end
 
   def message_view(message, user_id, reply_count \\ 0, presence \\ %{online_user_ids: []}) do
@@ -147,21 +224,25 @@ defmodule Jido.Assembly.Chat.Projections do
     metadata = message.metadata || %{}
     mentioned_user_ids = metadata_value(metadata, :mentions, [])
     reactions = reaction_views(message.reactions || %{}, user_id)
-    source = metadata_value(metadata, :source, "local")
-    channel = metadata_value(metadata, :channel, nil)
+    {source, channel} = message_source(metadata)
     author = author_name(sender, metadata)
+    body = message_text(message)
 
     %{
       id: message.id,
+      sequence: message.sequence,
       room_id: message.room_id,
+      permalink: message_permalink(message.room_id, message.id),
       sender_id: message.sender_id,
       author: author,
+      actor_role: actor_role(message.role, source),
       avatar: sender.initials,
       avatar_url: message_avatar_url(sender, author),
       tone: sender.tone,
       own: message.sender_id == user_id,
       time: format_time(message.inserted_at),
-      body: message_text(message),
+      body: body,
+      formatted_parts: TextParts.split(body),
       status: message.status |> Atom.to_string() |> String.replace("_", " "),
       source: to_string(source || "local"),
       source_label: source_label(source, channel),
@@ -169,7 +250,15 @@ defmodule Jido.Assembly.Chat.Projections do
       channel: normalize_optional(channel),
       bridge_id: normalize_optional(metadata_value(metadata, :bridge_id, nil)),
       delivery: delivery_view(message, metadata),
+      bridge_deliveries: bridge_deliveries(message.id),
+      attachments: message.content |> Attachments.parts() |> Enum.map(&Attachments.view/1),
       workflow: workflow_view(metadata),
+      release_decision: release_decision(message),
+      release_artifact: release_artifact(message, body),
+      release_publication: release_publication(message),
+      release_publication_receipt: release_publication_receipt(message),
+      agent_runs: agent_runs(message, body),
+      agent_sources: agent_sources(message),
       provider_payload: metadata_value(metadata, :provider_payload, %{}),
       metadata: metadata,
       thread_id: message.thread_id,
@@ -179,9 +268,24 @@ defmodule Jido.Assembly.Chat.Projections do
       mentioned_user_ids: mentioned_user_ids,
       mentions_current_user: user_id in mentioned_user_ids,
       reactions: reactions,
+      reaction_delivery: reaction_delivery(message, reactions),
       available_reactions: Seeds.available_reaction_options(reactions)
     }
   end
+
+  defp message_permalink(room_id, message_id),
+    do: "/?" <> URI.encode_query(room: room_id, message: message_id)
+
+  defp agent_sources(%{
+         role: :assistant,
+         room_id: room_id,
+         metadata: %{"agent_result" => %{"source_message_ids" => ids}}
+       })
+       when is_list(ids) do
+    for id <- ids, is_binary(id), do: %{id: id, href: message_permalink(room_id, id)}
+  end
+
+  defp agent_sources(_message), do: []
 
   def person(person_id, presence \\ %{online_user_ids: []})
   def person(nil, _presence), do: fallback_person("unknown")
@@ -222,7 +326,7 @@ defmodule Jido.Assembly.Chat.Projections do
     if query == "" do
       []
     else
-      room_views(presence)
+      room_views(presence, user_id)
       |> Enum.flat_map(fn room ->
         room.id
         |> list_all_message_views(user_id, presence)
@@ -240,13 +344,55 @@ defmodule Jido.Assembly.Chat.Projections do
   end
 
   defp people do
-    Seeds.demo_users() ++
+    if(Pilot.enabled?(), do: Pilot.people(), else: Seeds.demo_users()) ++
       Seeds.agent_people() ++
       [%{id: Seeds.system_user_id(), name: "Assembly", initials: "AS", presence: :online}]
   end
 
   defp default_room_kind(:direct), do: "dm"
   defp default_room_kind(_kind), do: "channel"
+
+  defp message_source(%{"jido_chat_origin" => %{"account_id" => account_id}}) do
+    case Bridges.account_provider(account_id) do
+      provider when is_atom(provider) -> {"adapter", provider}
+      _other -> {"adapter", nil}
+    end
+  end
+
+  defp message_source(metadata),
+    do: {metadata_value(metadata, :source, "local"), metadata_value(metadata, :channel, nil)}
+
+  defp actor_role(_role, "adapter"), do: "External participant"
+  defp actor_role(:assistant, _source), do: "Agent"
+  defp actor_role(:system, _source), do: "System"
+  defp actor_role(_role, _source), do: "Participant"
+
+  defp agent_runs(%{role: :user, room_id: room_id, id: message_id}, body) do
+    with true <- "agent:triage" in Mentions.mentioned_user_ids(body),
+         {:ok, runs} <- ChatStorage.agent_runs_for_trigger(room_id, message_id) do
+      Enum.map(runs, fn run ->
+        agent = Seeds.person_seed(run.agent_id).name
+
+        %{
+          id: run.id,
+          parent_run_id: run.parent_run_id,
+          reply_id: AgentRuns.reply_id(run.id),
+          label: agent_run_label(agent, run.scope),
+          status: Map.fetch!(@run_status, run.status)
+        }
+      end)
+    else
+      _unavailable -> []
+    end
+  end
+
+  defp agent_runs(_message, _body), do: []
+
+  defp agent_run_label(agent, "release_plan"), do: agent <> " release plan"
+  defp agent_run_label(agent, "release_synthesis"), do: agent <> " release summary"
+  defp agent_run_label(agent, "provider_delivery"), do: agent <> " delivery check"
+  defp agent_run_label(agent, "impact_and_rollout"), do: agent <> " rollout check"
+  defp agent_run_label(agent, _scope), do: agent <> " run"
 
   defp source_label("adapter", channel), do: connector_label(channel)
   defp source_label(:adapter, channel), do: connector_label(channel)
@@ -276,6 +422,10 @@ defmodule Jido.Assembly.Chat.Projections do
   defp connector_label(nil), do: "Adapter"
   defp connector_label(channel), do: channel |> to_string() |> String.capitalize()
 
+  defp author_name(sender, %{"jido_chat_origin" => %{"account_id" => _, "actor" => actor}}) do
+    Enum.find([actor["display_name"], actor["username"], actor["id"]], sender.name, &present?/1)
+  end
+
   defp author_name(sender, metadata) do
     external_name =
       metadata_value(metadata, :display_name, metadata_value(metadata, :username, nil))
@@ -286,9 +436,10 @@ defmodule Jido.Assembly.Chat.Projections do
   end
 
   defp message_avatar_url(sender, author) do
-    if generated_chat_id?(sender.id) and author != sender.name,
-      do: avatar_url(sender.id, author),
-      else: sender.avatar_url
+    if String.starts_with?(sender.id, "provider:") or
+         (generated_chat_id?(sender.id) and author != sender.name),
+       do: avatar_url(sender.id, author),
+       else: sender.avatar_url
   end
 
   defp generated_chat_id?(person_id), do: person_id |> to_string() |> String.starts_with?("jch_")
@@ -309,6 +460,51 @@ defmodule Jido.Assembly.Chat.Projections do
     }
   end
 
+  defp bridge_deliveries(message_id) do
+    case ChatStorage.message_deliveries(message_id) do
+      {:ok, work} ->
+        work
+        |> Enum.group_by(&{&1.account_id, &1[:external_room_id]})
+        |> Enum.sort_by(&elem(&1, 0))
+        |> Enum.map(fn {_target, attempts} ->
+          attempts |> Enum.max_by(&Map.get(&1, :attempt, 1)) |> bridge_delivery()
+        end)
+
+      {:error, _reason} ->
+        []
+    end
+  end
+
+  defp bridge_delivery(work) do
+    provider = work[:provider] || Bridges.account_provider(work.account_id)
+    route = work[:delivery_route] || :room
+
+    %{
+      provider: provider_label(provider),
+      external_room_id: work[:external_room_id],
+      attempt: Map.get(work, :attempt, 1),
+      status: delivery_status(route, work.status),
+      detail: delivery_detail(route),
+      route: Atom.to_string(route)
+    }
+  end
+
+  defp provider_label(:x), do: "X"
+  defp provider_label(provider) when is_atom(provider), do: connector_label(provider)
+  defp provider_label(_provider), do: "Provider"
+
+  defp delivery_status(:thread_skipped, _status), do: "Skipped"
+  defp delivery_status(:attachment_skipped, _status), do: "Skipped"
+  defp delivery_status(_route, :completed), do: "Delivered"
+  defp delivery_status(_route, :failed), do: "Failed"
+  defp delivery_status(_route, :unknown), do: "Delivery unconfirmed"
+  defp delivery_status(_route, _pending), do: "Pending"
+
+  defp delivery_detail(:thread_fallback), do: "Room fallback"
+  defp delivery_detail(:thread_skipped), do: "Thread delivery unavailable"
+  defp delivery_detail(:attachment_skipped), do: "Attachment delivery unsupported"
+  defp delivery_detail(_route), do: ""
+
   defp workflow_view(metadata) do
     case metadata_value(metadata, :workflow_event_type, nil) do
       nil ->
@@ -326,6 +522,120 @@ defmodule Jido.Assembly.Chat.Projections do
     end
   end
 
+  defp release_decision(%{
+         id: id,
+         sender_id: "agent:triage",
+         metadata: %{
+           "assembly_release_note" => %{
+             "type" => "decision",
+             "assignee" => assignee,
+             "choices" => choices
+           }
+         }
+       })
+       when is_binary(assignee) and is_map(choices) do
+    user_id = "user:" <> assignee
+
+    %{
+      id: id,
+      assignee: user_id,
+      name: Seeds.person_seed(user_id).name,
+      choices: Enum.sort(choices)
+    }
+  end
+
+  defp release_decision(_message), do: nil
+
+  defp release_artifact(
+         %{
+           id: id,
+           room_id: room_id,
+           metadata: %{
+             "assembly_release_note" =>
+               %{"type" => type, "version" => version, "assignee" => person} = data
+           }
+         },
+         body
+       )
+       when type in ["draft", "revision"] and is_integer(version) and is_binary(person) do
+    evidence =
+      for {id, title, text} <- ReleaseNotes.sources(data) do
+        %{title: title, evidence: text, href: "/release-notes#source-" <> URI.encode(id)}
+      end
+
+    user_id = "user:" <> person
+
+    %{
+      id: id,
+      version: version,
+      body: body,
+      assignee: user_id,
+      name: Seeds.person_seed(user_id).name,
+      sources: evidence ++ release_request_source(room_id, data)
+    }
+  end
+
+  defp release_artifact(_message, _body), do: nil
+
+  defp release_request_source(room_id, %{"run_id" => id}) when is_binary(id) do
+    [
+      %{
+        title: "Original release request",
+        evidence: "Open the message that started this release.",
+        href: message_permalink(room_id, id)
+      }
+    ]
+  end
+
+  defp release_request_source(_room_id, _data), do: []
+
+  defp release_publication(%{
+         id: id,
+         room_id: room_id,
+         sender_id: "agent:triage",
+         metadata: %{
+           "assembly_release_note" => %{
+             "type" => "publish_proposal",
+             "version_id" => version_id,
+             "version" => version,
+             "destination" => %{"id" => destination_id, "name" => destination_name},
+             "action" => action,
+             "approver" => approver
+           }
+         }
+       })
+       when is_binary(version_id) and is_integer(version) and is_binary(destination_id) and
+              is_binary(destination_name) and is_binary(action) and is_binary(approver) do
+    %{
+      id: id,
+      version_id: version_id,
+      version: version,
+      version_href: message_permalink(room_id, version_id),
+      destination_id: destination_id,
+      destination_name: destination_name,
+      action: action,
+      approver_id: "user:" <> approver,
+      approver: Seeds.person_seed("user:" <> approver).name
+    }
+  end
+
+  defp release_publication(_message), do: nil
+
+  defp release_publication_receipt(%{
+         sender_id: "agent:triage",
+         metadata: %{
+           "assembly_release_note" => %{
+             "type" => "publish_receipt",
+             "destination_id" => room_id,
+             "destination_message_id" => message_id
+           }
+         }
+       })
+       when is_binary(room_id) and is_binary(message_id),
+       do: message_permalink(room_id, message_id)
+
+  defp release_publication_receipt(_message), do: nil
+
   defp normalize_optional(nil), do: ""
   defp normalize_optional(value) when is_binary(value), do: value
   defp normalize_optional(value) when is_atom(value), do: Atom.to_string(value)
@@ -336,9 +646,10 @@ defmodule Jido.Assembly.Chat.Projections do
     timeline ++ (threads |> Map.values() |> List.flatten())
   end
 
-  defp message_from_fact(%Jido.Signal{data: %{"message" => %Message{} = message}}), do: message
+  @doc false
+  def message_from_fact(%Jido.Signal{data: %{"message" => %Message{} = message}}), do: message
 
-  defp message_from_fact(%Jido.Signal{data: %{"message" => message}}) when is_map(message),
+  def message_from_fact(%Jido.Signal{data: %{"message" => message}}) when is_map(message),
     do: Message.from_map(message)
 
   defp reaction_map(room_id, message_id) do
@@ -353,6 +664,12 @@ defmodule Jido.Assembly.Chat.Projections do
       {:error, _reason} ->
         %{}
     end
+  end
+
+  defp reaction_delivery(_message, []), do: []
+
+  defp reaction_delivery(message, _reactions) do
+    Bridges.unsupported_reaction_destinations(message.room_id, message.id)
   end
 
   defp actor_id(%Jido.Agent.Address{id: id}), do: id

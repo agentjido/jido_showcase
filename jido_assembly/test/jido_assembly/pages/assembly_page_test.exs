@@ -3,7 +3,7 @@ defmodule Jido.Assembly.Pages.AssemblyTest do
 
   alias Hologram.Component.{Action, Command}
   alias Hologram.Server.Broadcast
-  alias Jido.Assembly.Components.Assembly.{MobileWorkspacePanel, ThreadPanel}
+  alias Jido.Assembly.Components.Assembly.{DeveloperInspectorPanel, ThreadPanel}
   alias Jido.Assembly.{Chat, Presence}
   alias Jido.Assembly.Pages.Assembly
 
@@ -54,13 +54,18 @@ defmodule Jido.Assembly.Pages.AssemblyTest do
     assert delay == Presence.heartbeat_interval_ms()
   end
 
-  test "touch_presence command broadcasts the live presence projection" do
-    server = %Server{cid: "page", instance_id: "presence-test", session_id: "session-test"}
+  test "touch_presence broadcasts the session user's presence" do
+    server = %Server{
+      cid: "page",
+      instance_id: "presence-test",
+      session_id: "session-test",
+      user_id: "user:maggie"
+    }
 
     server =
       Assembly.command(
         :touch_presence,
-        %{user_id: "user:maggie", room_id: @ops_room},
+        %{user_id: "user:priya", room_id: @ops_room},
         server
       )
 
@@ -76,6 +81,7 @@ defmodule Jido.Assembly.Pages.AssemblyTest do
            ] = server.broadcasts
 
     assert "user:maggie" in online_user_ids
+    refute "user:priya" in online_user_ids
 
     assert Enum.any?(
              Presence.snapshot().sessions,
@@ -122,7 +128,7 @@ defmodule Jido.Assembly.Pages.AssemblyTest do
   test "template evaluates against initialized page state" do
     {component, _server} = init_page(Assembly)
 
-    assert [{:element, "main", _attrs, _children}] = Assembly.template().(component.state)
+    assert dom_has_class_fragment?(Assembly.template().(component.state), "assembly-shell")
   end
 
   test "send_message action validates blank drafts before queueing a server command" do
@@ -135,19 +141,24 @@ defmodule Jido.Assembly.Pages.AssemblyTest do
     refute component.next_command
   end
 
-  test "send_message action clears the composer and queues a persistence command" do
+  test "send_message action keeps the draft while the persistence command runs" do
     {component, _server} = init_page(Assembly)
     component = put_page_state(component, :draft, "  ship it  ")
 
     component = Assembly.action(:send_message, %{}, component)
 
-    assert component.state.draft == ""
+    assert component.state.draft == "  ship it  "
     assert component.state.send_pending
     assert component.state.error == nil
 
     assert %Command{
              name: :persist_message,
-             params: %{room_id: @ops_room, body: "ship it", sender_id: "user:you"}
+             params: %{
+               room_id: @ops_room,
+               body: "ship it",
+               sender_id: "user:you",
+               submission_id: 1
+             }
            } = component.next_command
   end
 
@@ -156,7 +167,7 @@ defmodule Jido.Assembly.Pages.AssemblyTest do
 
     component = Assembly.action(:send_message, %{"body" => "  enter submit  "}, component)
 
-    assert component.state.draft == ""
+    assert component.state.draft == "  enter submit  "
     assert component.state.send_pending
 
     assert %Command{
@@ -292,9 +303,12 @@ defmodule Jido.Assembly.Pages.AssemblyTest do
     assert component.state.thread_root.id == root.id
     assert component.state.last_event.title == "Thread opened"
 
-    dom = ThreadPanel.template().(component.state)
-    assert dom_has_attr?(dom, "role", "dialog")
-    assert dom_has_class_fragment?(dom, "xl:hidden")
+    mobile = ThreadPanel.template().(Map.put(component.state, :mobile, true))
+    desktop = ThreadPanel.template().(Map.put(component.state, :mobile, false))
+    assert dom_has_attr?(mobile, "role", "dialog")
+    assert dom_has_class_fragment?(mobile, "assembly-thread-mobile")
+    assert dom_has_attr?(desktop, "role", "complementary")
+    assert dom_has_class_fragment?(desktop, "assembly-thread-inline")
   end
 
   test "send_reply action accepts the submitted form body for Enter submits" do
@@ -304,7 +318,7 @@ defmodule Jido.Assembly.Pages.AssemblyTest do
     component = Assembly.action(:open_thread, %{message_id: root.id}, component)
     component = Assembly.action(:send_reply, %{"reply" => "  thread note  "}, component)
 
-    assert component.state.reply_draft == ""
+    assert component.state.reply_draft == "  thread note  "
     assert component.state.reply_pending
 
     assert %Command{
@@ -346,31 +360,16 @@ defmodule Jido.Assembly.Pages.AssemblyTest do
     assert component.state.active_room_id == @ops_room
   end
 
-  test "mobile workspace and inspector panels are available and close with focus return" do
+  test "the developer inspector opens on demand and can close" do
     {component, _server} = init_page(Assembly)
-
-    workspace = Assembly.action(:open_mobile_panel, %{panel: "workspace"}, component)
-    assert workspace.state.mobile_panel == "workspace"
-
-    workspace_dom = MobileWorkspacePanel.template().(workspace.state)
-    assert dom_has_attr?(workspace_dom, "role", "dialog")
-
-    assert dom_has_attr?(
-             workspace_dom,
-             "aria-label",
-             "Workspace tools and developer inspector"
-           )
 
     inspector = Assembly.action(:open_mobile_panel, %{panel: "inspector"}, component)
     assert inspector.state.mobile_panel == "inspector"
 
-    inspector_dom = MobileWorkspacePanel.template().(inspector.state)
+    inspector_dom = DeveloperInspectorPanel.template().(inspector.state)
 
-    assert dom_has_attr?(
-             inspector_dom,
-             "aria-label",
-             "Workspace tools and developer inspector"
-           )
+    assert dom_has_attr?(inspector_dom, "role", "dialog")
+    assert dom_has_attr?(inspector_dom, "aria-label", "Developer inspector")
 
     closed = Assembly.action(:close_mobile_panel, %{}, inspector)
     assert closed.state.mobile_panel == ""
@@ -558,6 +557,7 @@ defmodule Jido.Assembly.Pages.AssemblyTest do
   defp attr_value_equals?(value, expected) when is_list(value) do
     Enum.any?(value, fn
       {:text, text} -> text == expected
+      {:expression, {text}} -> text == expected
       _other -> false
     end)
   end
@@ -567,7 +567,7 @@ defmodule Jido.Assembly.Pages.AssemblyTest do
   defp attr_value_contains?(value, fragment) when is_list(value) do
     Enum.any?(value, fn
       {:text, text} -> String.contains?(text, fragment)
-      {:expression, text} when is_binary(text) -> String.contains?(text, fragment)
+      {:expression, {text}} when is_binary(text) -> String.contains?(text, fragment)
       _other -> false
     end)
   end

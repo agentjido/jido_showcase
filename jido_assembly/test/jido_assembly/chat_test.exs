@@ -76,13 +76,13 @@ defmodule Jido.Assembly.ChatTest do
   end
 
   test "send_message resolves agent mentions through persisted participants" do
-    body = "@triage can you review this? #{System.unique_integer([:positive])}"
+    body = "@bridge can you review this? #{System.unique_integer([:positive])}"
 
     assert {:ok, message} = Chat.send_message(@ops_room, body, "user:you")
-    assert "agent:triage" in message.mentioned_user_ids
+    assert "agent:bridge" in message.mentioned_user_ids
 
     assert {:ok, record} = ChatRuntime.get_room_history(@ops_room, message.id)
-    assert Chat.message_record(record).metadata["mention_handles"] == ["triage"]
+    assert Chat.message_record(record).metadata["mention_handles"] == ["bridge"]
   end
 
   test "toggle_reaction persists reaction state on messages" do

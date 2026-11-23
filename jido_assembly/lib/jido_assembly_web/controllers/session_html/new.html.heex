@@ -1,0 +1,24 @@
+<main class="mx-auto max-w-sm px-6 py-16">
+  <h1 class="mb-6 text-2xl font-semibold">Sign in to Assembly</h1>
+  <p :if={@error} role="alert" class="mb-4 text-error">{@error}</p>
+  <form action={~p"/sign-in"} method="post" class="grid gap-4">
+    <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+    <input :for={{key, value} <- @chat_params} type="hidden" name={key} value={value} />
+    <label class="grid gap-1 text-sm font-medium">
+      User ID
+      <input name="user_id" required maxlength="45" autocomplete="username" class="input w-full" />
+    </label>
+    <label class="grid gap-1 text-sm font-medium">
+      Access key
+      <input
+        name="access_key"
+        type="password"
+        required
+        maxlength="43"
+        autocomplete="current-password"
+        class="input w-full"
+      />
+    </label>
+    <button class="btn btn-primary" type="submit">Sign in</button>
+  </form>
+</main>

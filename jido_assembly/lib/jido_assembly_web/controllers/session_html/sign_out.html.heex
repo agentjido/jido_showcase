@@ -1,0 +1,8 @@
+<main class="mx-auto max-w-sm px-6 py-16">
+  <h1 class="mb-6 text-2xl font-semibold">Sign out of Assembly?</h1>
+  <form action={~p"/sign-out"} method="post" class="flex items-center gap-4">
+    <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
+    <button class="btn btn-primary" type="submit">Sign out</button>
+    <a href="/" class="link">Back to chat</a>
+  </form>
+</main>

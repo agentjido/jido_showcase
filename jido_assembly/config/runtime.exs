@@ -1,7 +1,11 @@
 import Config
 import Dotenvy
 
-if config_env() != :test do
+if config_env() == :test do
+  test_run_id = Base.url_encode64(:crypto.strong_rand_bytes(12), padding: false)
+  test_db = Path.join(System.tmp_dir!(), "jido-assembly-#{test_run_id}.sqlite3")
+  config :jido_assembly, :sqlite_path, test_db
+else
   app_root = System.get_env("RELEASE_ROOT") || Path.expand("..", __DIR__)
 
   source!([
@@ -41,6 +45,35 @@ agent_mode =
   end
 
 config :jido_assembly, :agent_mode, agent_mode
+
+if config_env() != :test do
+  case System.get_env("JIDO_ASSEMBLY_ROSTER") do
+    nil ->
+      config :jido_assembly, :require_pilot, config_env() == :prod
+
+    roster ->
+      database = System.get_env("JIDO_ASSEMBLY_PILOT_DB")
+
+      if database in [nil, "", ":memory:"] or
+           Path.expand(database) == Path.expand("data/jido_assembly_v3.sqlite3") do
+        raise "Set JIDO_ASSEMBLY_PILOT_DB to a dedicated SQLite file."
+      end
+
+      config :jido_assembly, pilot_roster: roster, sqlite_path: Path.expand(database)
+
+      config :jido_assembly, :agent_trigger_options,
+        enabled: System.get_env("JIDO_ASSEMBLY_PILOT_AGENTS") == "1"
+  end
+end
+
+if System.get_env("JIDO_ASSEMBLY_RELEASE_DELEGATION") == "1" and config_env() != :test do
+  config :jido_assembly, :agent_trigger_options,
+    release_delegation: true,
+    release_publication_recommendation:
+      System.get_env("JIDO_ASSEMBLY_RELEASE_PUBLICATION_RECOMMENDATION") == "1",
+    release_peer_context: System.get_env("JIDO_ASSEMBLY_RELEASE_PEER_CONTEXT") != "0",
+    release_rollout_required: System.get_env("JIDO_ASSEMBLY_RELEASE_ROLLOUT_REQUIRED") != "0"
+end
 
 if config_env() == :prod do
   # The secret key base is used to sign/encrypt cookies and other secrets.

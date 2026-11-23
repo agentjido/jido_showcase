@@ -7,6 +7,7 @@ defmodule Jido.Assembly.Chat.Mentions do
   """
 
   alias Jido.Assembly.Seeds
+  alias Jido.Assembly.Chat.TextParts
 
   @handle_pattern ~r/(?:^|[^\p{L}\p{N}_])@([A-Za-z][A-Za-z0-9_]*(?:[.-][A-Za-z0-9_]+)*)/u
   @default_limit 500
@@ -42,8 +43,12 @@ defmodule Jido.Assembly.Chat.Mentions do
   end
 
   defp mention_tokens(body) do
-    body = to_string(body)
+    for %{kind: :text, text: text, offset: offset} <- TextParts.split(to_string(body)),
+        token <- scan_mentions(text, offset),
+        do: token
+  end
 
+  defp scan_mentions(body, base_offset) do
     Regex.scan(@handle_pattern, body, return: :index)
     |> Enum.flat_map(fn
       [{_match_offset, _match_length}, {handle_offset, handle_length}] ->
@@ -55,7 +60,7 @@ defmodule Jido.Assembly.Chat.Mentions do
           %{
             handle: normalize_handle(handle),
             mention_text: binary_part(body, mention_offset, mention_length),
-            offset: mention_offset,
+            offset: base_offset + mention_offset,
             length: mention_length
           }
         ]
@@ -79,7 +84,9 @@ defmodule Jido.Assembly.Chat.Mentions do
     limit = Keyword.get(opts, :limit, @default_limit)
 
     opts
-    |> Keyword.get_lazy(:participants, fn -> Seeds.demo_users() ++ Seeds.agent_people() end)
+    |> Keyword.get_lazy(:participants, fn ->
+      Enum.reject(Seeds.people(), &(Map.get(&1, :type) == :system))
+    end)
     |> Enum.take(limit)
   end
 

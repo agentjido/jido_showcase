@@ -1,7 +1,7 @@
 defmodule Jido.Assembly.AgentsTest do
   use ExUnit.Case, async: false
 
-  alias Jido.Assembly.{Agents, Chat, ChatRuntime}
+  alias Jido.Assembly.{Agents, Chat, ChatRuntime, ScriptedInference}
 
   @ops_room "room:ops-workflow"
   @agent_names ["Triage Agent", "Bridge Agent", "Runbook Agent"]
@@ -11,15 +11,18 @@ defmodule Jido.Assembly.AgentsTest do
     app_key = Application.get_env(:req_llm, :anthropic_api_key)
     agent_mode = Application.get_env(:jido_assembly, :agent_mode)
     env_key = System.get_env("ANTHROPIC_API_KEY")
+    ollama_model = System.get_env("JIDO_ASSEMBLY_OLLAMA_MODEL")
 
     Application.delete_env(:req_llm, :anthropic_api_key)
     Application.put_env(:jido_assembly, :agent_mode, :live)
     System.delete_env("ANTHROPIC_API_KEY")
+    System.delete_env("JIDO_ASSEMBLY_OLLAMA_MODEL")
 
     on_exit(fn ->
       restore_app_key(app_key)
       restore_agent_mode(agent_mode)
-      restore_env_key(env_key)
+      restore_env("ANTHROPIC_API_KEY", env_key)
+      restore_env("JIDO_ASSEMBLY_OLLAMA_MODEL", ollama_model)
     end)
 
     :ok
@@ -39,6 +42,25 @@ defmodule Jido.Assembly.AgentsTest do
     assert {:error, :missing_api_key} = Agents.run_round(@ops_room)
   end
 
+  test "the configured Ollama model reaches the Jido agent with the bounded reply options" do
+    System.put_env("JIDO_ASSEMBLY_OLLAMA_MODEL", " local-fixture:latest ")
+    {room, prompt} = prompted_room!("Check the configured model.")
+    start_supervised!({ScriptedInference, ["The local model config is active."]})
+
+    assert %{enabled: true, model: "ollama:local-fixture:latest"} = Agents.snapshot()
+
+    assert {:ok, %{messages: [_reply]}} =
+             Agents.run_round(room.id,
+               prompt_message_id: prompt.id,
+               inference_client: ScriptedInference,
+               max_agents: 1
+             )
+
+    assert [%{model: "ollama:local-fixture:latest", options: options}] = ScriptedInference.calls()
+    assert options[:reasoning_effort] == :none
+    assert options[:max_tokens] == 140
+  end
+
   test "scripted mode enables deterministic browser Agent rounds without a live key" do
     Application.put_env(:jido_assembly, :agent_mode, :scripted)
     {room, prompt} = prompted_room!("Prove the scripted browser path.")
@@ -56,6 +78,29 @@ defmodule Jido.Assembly.AgentsTest do
 
     assert Enum.count(result.messages) == 3
     assert Enum.all?(result.messages, &String.contains?(&1.body, "scripted V3 path"))
+  end
+
+  test "a real Jido agent turn uses controlled inference and saves its answer in Jido Chat" do
+    request = "Check the release candidate R42."
+    answer = "The R42 package checks passed."
+    {room, prompt} = prompted_room!(request)
+    start_supervised!({ScriptedInference, [answer]})
+
+    assert {:ok, %{messages: [message], prompt_message_id: prompt_id}} =
+             Agents.run_round(room.id,
+               prompt_message_id: prompt.id,
+               inference_client: ScriptedInference,
+               max_agents: 1
+             )
+
+    assert prompt_id == prompt.id
+    assert [%{messages: messages}] = ScriptedInference.calls()
+    prompt_text = for %{content: parts} <- messages, %{type: :text, text: text} <- parts, do: text
+    assert Enum.any?(prompt_text, &String.contains?(&1, request))
+
+    assert {:ok, record} = ChatRuntime.get_room_history(room.id, message.id)
+    assert %{role: :assistant, sender_id: "agent:triage"} = Chat.message_record(record)
+    assert {:ok, %{body: ^answer}} = Chat.get_message_view(message.id)
   end
 
   test "run_round requires the safety cap even with a test responder" do
@@ -209,6 +254,6 @@ defmodule Jido.Assembly.AgentsTest do
   defp restore_agent_mode(nil), do: Application.delete_env(:jido_assembly, :agent_mode)
   defp restore_agent_mode(value), do: Application.put_env(:jido_assembly, :agent_mode, value)
 
-  defp restore_env_key(nil), do: System.delete_env("ANTHROPIC_API_KEY")
-  defp restore_env_key(value), do: System.put_env("ANTHROPIC_API_KEY", value)
+  defp restore_env(name, nil), do: System.delete_env(name)
+  defp restore_env(name, value), do: System.put_env(name, value)
 end

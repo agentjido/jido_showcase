@@ -14,7 +14,9 @@ defmodule Jido.Assembly.ChatRuntime do
     },
     connection_definitions: %{
       "assembly.telegram.v1" => Jido.Assembly.ChatConnections.Telegram,
-      "assembly.discord.v1" => Jido.Assembly.ChatConnections.Discord
+      "assembly.discord.v1" => Jido.Assembly.ChatConnections.Discord,
+      "assembly.slack.v1" => Jido.Assembly.ChatConnections.Slack,
+      "assembly.x.v1" => Jido.Assembly.ChatConnections.X
     },
     secret_resolver: Jido.Assembly.ChatConnections.EnvironmentResolver
 end

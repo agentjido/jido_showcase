@@ -5,6 +5,8 @@ defmodule Jido.Assembly.Application do
 
   @impl true
   def start(_type, _args) do
+    Jido.Assembly.Pilot.configure!()
+
     children = [
       Jido.AssemblyWeb.Telemetry,
       {DNSCluster, query: Application.get_env(:jido_assembly, :dns_cluster_query) || :ignore},
@@ -12,13 +14,20 @@ defmodule Jido.Assembly.Application do
       Jido.AssemblyWeb.Presence,
       Jido.Assembly.Jido,
       {Jido.Assembly.ChatStorage,
-       path: Application.get_env(:jido_assembly, :sqlite_path, "data/jido_assembly_v3.sqlite3")},
+       path: Application.get_env(:jido_assembly, :sqlite_path, "data/jido_assembly_v3.sqlite3"),
+       mode: Jido.Assembly.Pilot.mode()},
       Jido.Assembly.ChatRuntime,
       Jido.Assembly.Seeds,
-      Jido.Assembly.Bridges,
+      {Task.Supervisor, name: Jido.Assembly.AgentRuns.Tasks},
+      Jido.Assembly.AgentRuns,
+      Jido.Assembly.ReleaseNotes.Workflow,
+      {Jido.Assembly.Bridges, Application.get_env(:jido_assembly, :bridge_options, [])},
+      Jido.Assembly.ChatConnections.PendingReplies,
+      Jido.Assembly.ChatConnections.DeliveryRetries,
       Jido.AssemblyWeb.RuntimeNotifier,
       Jido.Assembly.Presence.SessionSupervisor,
       Jido.Assembly.Presence,
+      Jido.Assembly.PilotSessions,
       Jido.AssemblyWeb.Endpoint
     ]
 

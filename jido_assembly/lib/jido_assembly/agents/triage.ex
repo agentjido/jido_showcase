@@ -8,6 +8,10 @@ defmodule Jido.Assembly.Agents.Triage do
     description: "Impact and severity AI participant for Assembly ops workflow rooms."
 
   ai do
+    tools do
+      action(Jido.Assembly.Agents.Actions.ReadReleaseEvidence)
+    end
+
     reasoning Jido.AI.Reasoning.ReAct do
       model("anthropic:claude-haiku-4-5")
 

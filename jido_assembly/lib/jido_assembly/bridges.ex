@@ -10,7 +10,8 @@ defmodule Jido.Assembly.Bridges do
 
   require Logger
 
-  alias Jido.Assembly.{ChatRuntime, Seeds}
+  alias Jido.Assembly.{ChatRuntime, ChatStorage, Pilot, Seeds}
+  alias Jido.Chat.{Adapter, Plugin}
   alias Jido.Chat.Runtime.Bridge.Binding
   alias Jido.Chat.Runtime.Signal.Room.Join
 
@@ -45,7 +46,11 @@ defmodule Jido.Assembly.Bridges do
 
   @impl true
   def init(opts) do
-    {:ok, %{setup: :pending, snapshot: nil, opts: opts}, {:continue, :setup}}
+    if Pilot.enabled?() do
+      {:ok, %{setup: :disabled, snapshot: nil, opts: opts}}
+    else
+      {:ok, %{setup: :pending, snapshot: nil, opts: opts}, {:continue, :setup}}
+    end
   end
 
   @impl true
@@ -84,12 +89,67 @@ defmodule Jido.Assembly.Bridges do
     end
   end
 
+  @doc "Binds a declared provider account and admits it to the Assembly room."
+  def bind(account_id, room_id, external_room_id, opts \\ []) do
+    attrs = %{
+      account_id: account_id,
+      room_id: room_id,
+      external_room_id: external_room_id,
+      direction: Keyword.get(opts, :direction, :both),
+      enabled: true,
+      metadata: Keyword.get(opts, :metadata, %{"source" => "jido_assembly"})
+    }
+
+    with {:ok, %Binding{}} <- Binding.new(attrs),
+         {:ok, %_{}} <- ChatRuntime.get_connection_declaration(account_id),
+         {:ok, binding} <- ChatRuntime.get_bridge_binding(account_id, external_room_id),
+         :ok <- ensure_room_membership(room_id, account_id) do
+      upsert_binding(attrs, binding)
+    else
+      {:ok, nil} -> {:error, :connection_not_found}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  def account_provider(account_id) do
+    with {:ok, adapter} <- account_adapter(account_id), do: adapter.channel_type()
+  end
+
+  @doc "Queues a new attempt for one definitively failed destination."
+  def retry_delivery(message_id, account_id, external_room_id) do
+    with {:ok, work} <-
+           ChatStorage.retry_message_delivery(message_id, account_id, external_room_id) do
+      _ = ChatRuntime.recover_bridge(account_id)
+      {:ok, work}
+    end
+  end
+
+  @doc false
+  def account_adapter(account_id) do
+    with {:ok, %{definition_key: key}} <- ChatRuntime.get_connection_declaration(account_id),
+         do: connection_adapter(key)
+  end
+
+  def external_actor_id(account_id, external_actor_id) do
+    identity = :erlang.term_to_binary({account_id, external_actor_id}, [:deterministic])
+    "provider:" <> Base.url_encode64(:crypto.hash(:sha256, identity), padding: false)
+  end
+
   def ensure_ops_room!(room_id \\ Seeds.default_room_id(), opts \\ []) do
     env_fun = Keyword.get(opts, :env_fun, &System.get_env/1)
-    results = Enum.map(@connectors, &ensure_connector(room_id, &1, env_fun, opts))
 
-    case Enum.find(results, &match?({:error, _reason}, &1)) do
+    results =
+      Enum.map(@connectors, fn connector ->
+        :global.trans(
+          {{__MODULE__, connector.account_id}, self()},
+          fn -> ensure_connector(room_id, connector, env_fun, opts) end,
+          [node()]
+        )
+      end)
+
+    case Enum.find(results, &(!match?({:ok, _result}, &1))) do
       nil -> {:ok, Map.put(snapshot(room_id, env_fun: env_fun), :setup_results, results)}
+      :aborted -> {:error, :provider_setup_aborted}
       {:error, reason} -> {:error, reason}
     end
   end
@@ -111,6 +171,44 @@ defmodule Jido.Assembly.Bridges do
       headline: connector_headline(connectors),
       llm: llm_status(env_fun)
     }
+  end
+
+  @doc "Reports which linked destinations cannot send a local reaction."
+  def unsupported_reaction_destinations(room_id, message_id) do
+    with {:ok, accounts} <- ChatRuntime.list_connection_declarations() do
+      for account <- accounts,
+          {:ok, links} <- [
+            ChatStorage.links_for_local(ChatStorage, account.account_id, message_id)
+          ],
+          Enum.any?(links, &outbound_link?(&1, room_id)),
+          {:ok, adapter} <- [connection_adapter(account.definition_key)],
+          Adapter.capabilities(adapter)[:add_reaction] == :unsupported do
+        %{
+          account_id: account.account_id,
+          provider: adapter.channel_type() |> to_string(),
+          status: "unsupported"
+        }
+      end
+    else
+      {:error, _reason} -> []
+    end
+  end
+
+  defp outbound_link?(link, room_id) do
+    case ChatRuntime.get_bridge_binding(link.account_id, link.external_room_id) do
+      {:ok, %Binding{room_id: ^room_id, enabled: true, direction: direction}} ->
+        direction in [:outbound, :both]
+
+      _other ->
+        false
+    end
+  end
+
+  defp connection_adapter(key) do
+    with {:ok, definition} <- ChatRuntime.connection_definition(key),
+         %{data: %{connections: [%{client: %{adapter: adapter}}]}} <-
+           Enum.find(Jido.Agent.definition(definition).plugins, &(&1.provider == Plugin)),
+         do: {:ok, adapter}
   end
 
   defp ensure_connector(room_id, connector, env_fun, opts) do
@@ -179,17 +277,56 @@ defmodule Jido.Assembly.Bridges do
     if live_ready?(connector, env_fun) do
       target = target(connector, env_fun)
 
-      with :ok <- ensure_room_membership(room_id, connector.account_id),
-           {:ok, bindings} <- ChatRuntime.list_bridge_bindings(connector.account_id),
-           :ok <- disable_other_bindings(connector.account_id, bindings, target),
-           do: ensure_binding(room_id, connector, target, bindings)
+      with {:ok, bindings} <- ChatRuntime.list_bridge_bindings(connector.account_id) do
+        replace_configured_binding(room_id, connector, target, bindings)
+      end
     else
       with {:ok, bindings} <- ChatRuntime.list_bridge_bindings(connector.account_id),
-           :ok <- disable_other_bindings(connector.account_id, bindings, nil) do
+           :ok <- disable_bindings(connector.account_id, bindings) do
         {:ok, nil}
       end
     end
   end
+
+  defp replace_configured_binding(room_id, connector, target, bindings) do
+    current = Enum.find(bindings, &(&1.external_room_id == target))
+
+    attrs = %{
+      room_id: room_id,
+      direction: :both,
+      enabled: true,
+      metadata: %{"provider" => connector.id, "source" => "jido_assembly"}
+    }
+
+    with {:ok, binding, changes} <-
+           configured_binding(current, connector.account_id, target, attrs),
+         :ok <- ensure_room_membership(room_id, connector.account_id) do
+      disable =
+        for previous <- bindings, previous.enabled, previous.external_room_id != target do
+          {:ok, next} = Binding.set_enabled(previous, false)
+          binding_update(previous, next)
+        end
+
+      with {:ok, _records} <- ChatStorage.commit(ChatStorage, disable ++ changes),
+           do: {:ok, binding}
+    end
+  end
+
+  defp configured_binding(nil, account_id, target, attrs) do
+    with {:ok, binding} <-
+           Binding.new(Map.merge(attrs, %{account_id: account_id, external_room_id: target})),
+         do: {:ok, binding, [{:insert_binding, binding}]}
+  end
+
+  defp configured_binding(%Binding{} = current, _account_id, _target, attrs) do
+    with {:ok, next} <- Binding.update(current, attrs) do
+      changes = if next == current, do: [], else: [binding_update(current, next)]
+      {:ok, next, changes}
+    end
+  end
+
+  defp binding_update(previous, next),
+    do: {:update_binding, previous.account_id, previous.external_room_id, previous.revision, next}
 
   defp ensure_room_membership(room_id, account_id) do
     with {:ok, member} <- ChatRuntime.connection_ref(account_id),
@@ -219,9 +356,9 @@ defmodule Jido.Assembly.Bridges do
     end
   end
 
-  defp disable_other_bindings(account_id, bindings, target) do
+  defp disable_bindings(account_id, bindings) do
     bindings
-    |> Enum.filter(&(&1.enabled and &1.external_room_id != target))
+    |> Enum.filter(& &1.enabled)
     |> Enum.reduce_while(:ok, fn binding, :ok ->
       case ChatRuntime.deprovision_bridge_binding(account_id, binding.external_room_id) do
         {:ok, _result} -> {:cont, :ok}
@@ -230,39 +367,25 @@ defmodule Jido.Assembly.Bridges do
     end)
   end
 
-  defp ensure_binding(room_id, connector, target, bindings) do
-    attrs = %{
-      account_id: connector.account_id,
-      room_id: room_id,
-      external_room_id: target,
-      direction: :both,
-      enabled: true,
-      metadata: %{"provider" => connector.id, "source" => "jido_assembly"}
-    }
+  defp upsert_binding(attrs, nil) do
+    with {:ok, %{binding: binding}} <- ChatRuntime.create_bridge_binding(attrs),
+         do: {:ok, binding}
+  end
 
-    case Enum.find(bindings, &(&1.external_room_id == target)) do
-      nil ->
-        case ChatRuntime.create_bridge_binding(attrs) do
-          {:ok, %{binding: binding}} -> {:ok, binding}
-          {:error, reason} -> {:error, reason}
-        end
+  defp upsert_binding(attrs, binding) do
+    update = Map.take(attrs, [:room_id, :direction, :enabled, :metadata])
 
-      binding ->
-        update = Map.take(attrs, [:room_id, :direction, :enabled, :metadata])
-
-        if Map.take(binding, Map.keys(update)) == update do
-          {:ok, binding}
-        else
-          case ChatRuntime.update_bridge_binding(
-                 connector.account_id,
-                 target,
-                 binding.revision,
-                 update
-               ) do
-            {:ok, %{binding: next}} -> {:ok, next}
-            {:error, reason} -> {:error, reason}
-          end
-        end
+    if Map.take(binding, Map.keys(update)) == update do
+      {:ok, binding}
+    else
+      with {:ok, %{binding: next}} <-
+             ChatRuntime.update_bridge_binding(
+               binding.account_id,
+               binding.external_room_id,
+               binding.revision,
+               update
+             ),
+           do: {:ok, next}
     end
   end
 
@@ -384,13 +507,13 @@ defmodule Jido.Assembly.Bridges do
   end
 
   defp llm_status(env_fun) do
-    if present?(env_fun.("ANTHROPIC_API_KEY")) do
+    if Jido.Assembly.Agents.live_model_configured?(env_fun) do
       %{mode: "live", status: "ready", missing_env: []}
     else
       %{
         mode: "disabled",
-        status: "ANTHROPIC_API_KEY required",
-        missing_env: ["ANTHROPIC_API_KEY"]
+        status: "Live model required",
+        missing_env: ["ANTHROPIC_API_KEY or JIDO_ASSEMBLY_OLLAMA_MODEL"]
       }
     end
   end

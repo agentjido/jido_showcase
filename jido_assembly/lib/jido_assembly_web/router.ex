@@ -18,6 +18,12 @@ defmodule Jido.AssemblyWeb.Router do
     pipe_through :browser
 
     get "/health", PageController, :home
+    get "/sign-in", SessionController, :new
+    post "/sign-in", SessionController, :create
+    get "/sign-out", SessionController, :confirm_delete
+    post "/sign-out", SessionController, :delete
+    get "/release-notes", ReleaseNotesController, :index
+    post "/release-notes", ReleaseNotesController, :submit
   end
 
   # Other scopes may use custom stacks.

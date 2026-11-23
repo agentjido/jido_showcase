@@ -22,9 +22,32 @@ defmodule Jido.Assembly.Seeds do
   @system_user_id "system:assembly"
   @default_room_id "room:ops-workflow"
 
+  @release_room_id "room:jido-chat-release"
+  @release_log_room_id "room:release-log"
+  @release_people [
+    %{
+      id: "user:maya",
+      name: "Maya Reyes",
+      handle: "maya",
+      initials: "MR",
+      title: "Release lead",
+      presence: :online,
+      tone: "bg-indigo-200 text-indigo-950"
+    },
+    %{
+      id: "user:eli",
+      name: "Eli Park",
+      handle: "eli",
+      initials: "EP",
+      title: "Reviewer",
+      presence: :online,
+      tone: "bg-rose-200 text-rose-950"
+    }
+  ]
+
   @reaction_options [
     %{key: "+1", glyph: "👍", label: "Agree"},
-    %{key: "ship", glyph: "🚀", label: "Approve"},
+    %{key: "ship", glyph: "🚀", label: "Ready to ship"},
     %{key: "seen", glyph: "👀", label: "Seen"}
   ]
 
@@ -161,6 +184,27 @@ defmodule Jido.Assembly.Seeds do
       name: "runtime",
       topic: "Jido Chat Runtime persistence, Signals, and Hologram state.",
       position: 20
+    },
+    %{
+      id: @release_room_id,
+      name: "jido-chat-release",
+      topic: "Scripted release-note requests, revisions, and reviews.",
+      position: 25,
+      members: [
+        @current_user_id,
+        "user:maya",
+        "user:eli",
+        "agent:triage",
+        "agent:bridge",
+        "agent:runbook"
+      ]
+    },
+    %{
+      id: @release_log_room_id,
+      name: "release-log",
+      topic: "Approved release notes for the local Assembly workspace.",
+      position: 26,
+      members: [@current_user_id, "user:maya", "user:eli", "agent:triage"]
     },
     %{
       id: "room:connector-lab",
@@ -331,8 +375,23 @@ defmodule Jido.Assembly.Seeds do
   def workspace_name, do: @workspace_name
   def current_user_id, do: @current_user_id
   def system_user_id, do: @system_user_id
-  def default_room_id, do: @default_room_id
-  def people, do: @people
+
+  def default_room_id,
+    do: if(Jido.Assembly.Pilot.enabled?(), do: "room:general", else: @default_room_id)
+
+  def people do
+    if Jido.Assembly.Pilot.enabled?() do
+      agent_people() ++
+        Enum.map(Jido.Assembly.Pilot.people(), fn %{id: "user:" <> handle} = user ->
+          Map.put(user, :handle, handle)
+        end)
+    else
+      @people ++ @release_people
+    end
+  end
+
+  def release_room_id, do: @release_room_id
+  def release_log_room_id, do: @release_log_room_id
   def reaction_options, do: @reaction_options
 
   def agent_people do
@@ -340,7 +399,7 @@ defmodule Jido.Assembly.Seeds do
   end
 
   def demo_users do
-    @people
+    (@people ++ @release_people)
     |> Enum.reject(&Map.get(&1, :type))
     |> Enum.map(&person_view_from_seed/1)
   end
@@ -352,7 +411,7 @@ defmodule Jido.Assembly.Seeds do
   end
 
   def person_seed(person_id) do
-    Enum.find(@people, &(&1.id == person_id)) || fallback_person(person_id)
+    Enum.find(people(), &(&1.id == person_id)) || fallback_person(person_id)
   end
 
   def reaction_metadata(emoji) do
@@ -388,6 +447,55 @@ defmodule Jido.Assembly.Seeds do
   def handle_call(:ensure_seeded, _from, state), do: {:reply, :ok, state}
 
   defp seed_all do
+    if Jido.Assembly.Pilot.enabled?(), do: seed_pilot(), else: seed_demo()
+  end
+
+  defp seed_pilot do
+    members = Enum.map(people(), & &1.id)
+
+    starter = %{
+      id: default_room_id(),
+      kind: :channel,
+      name: "general",
+      members: members,
+      metadata: %{
+        "workspace_id" => @workspace_id,
+        "assembly_kind" => "channel",
+        "topic" => "Team chat",
+        "position" => -1
+      }
+    }
+
+    with {:ok, _status} <- ChatRuntime.reconcile_runtime(),
+         :ok <- ensure_room(starter) do
+      sync_pilot_members(members, [])
+    end
+  end
+
+  defp sync_pilot_members(members, cursor) do
+    with {:ok, rooms} <- ChatRuntime.list_rooms(Keyword.put(cursor, :limit, 100)),
+         :ok <- sync_channel_members(rooms, members) do
+      case rooms do
+        [] -> :ok
+        _rooms -> sync_pilot_members(members, after: List.last(rooms).id)
+      end
+    end
+  end
+
+  defp sync_channel_members(rooms, members) do
+    Enum.reduce_while(rooms, :ok, fn
+      %{kind: :channel, id: id, metadata: %{"workspace_id" => @workspace_id}}, :ok ->
+        case join_members(id, members) do
+          :ok -> {:cont, :ok}
+          {:error, _reason} = error -> {:halt, error}
+        end
+
+      _room, :ok ->
+        {:cont, :ok}
+    end)
+  end
+
+  defp seed_demo do
     with {:ok, _version} <- ChatStorage.get_metadata("seed_version"),
          :ok <- seed_rooms(),
          :ok <- seed_messages(),
@@ -490,6 +598,8 @@ defmodule Jido.Assembly.Seeds do
       end
     end)
   end
+
+  defp channel_member_ids(%{members: members}), do: members
 
   defp channel_member_ids(%{agent_room: true}) do
     demo_user_ids() ++

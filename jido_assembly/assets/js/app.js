@@ -84,8 +84,11 @@ import "phoenix_html"
 
 const composerFieldSelector = "[data-assembly-composer] input[type='text'], [data-assembly-composer] textarea"
 const chatScrollSelector = "[data-assembly-chat-scroll]"
-const chatMessageSelector = "[data-assembly-message-id]"
+const threadScrollSelector = "[data-assembly-thread-scroll]"
 const chatEndSelector = "[data-assembly-chat-end]"
+const chatFocusSelector = "[data-assembly-focus-target='true']"
+const mobileThreadSelector = '[role="dialog"][data-assembly-thread-root]'
+const threadTriggerSelector = "[data-assembly-thread-trigger]"
 const chatBottomThreshold = 160
 
 const runAfterPaint = (callback) => {
@@ -96,12 +99,12 @@ const chatBottomDistance = (scroller) => (
   scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
 )
 
-const chatMessageSignature = (scroller) => {
-  const messages = scroller.querySelectorAll(chatMessageSelector)
+const chatTailKey = (scroller) => {
+  const messages = scroller.querySelectorAll("[data-assembly-room-message]")
   const lastMessage = messages[messages.length - 1]
   const lastMessageId = lastMessage?.getAttribute("data-assembly-message-id") || ""
 
-  return `${messages.length}:${lastMessageId}`
+  return `${scroller.dataset.assemblyRoomId}:${lastMessageId}`
 }
 
 const scrollChatToBottom = (scroller, { behavior = "smooth", force = false } = {}) => {
@@ -115,6 +118,8 @@ const scrollChatToBottom = (scroller, { behavior = "smooth", force = false } = {
   if (!shouldScroll) return
 
   runAfterPaint(() => {
+    if (scroller.querySelector(chatFocusSelector)) return
+
     const end = scroller.querySelector(chatEndSelector)
 
     if (end) {
@@ -125,12 +130,32 @@ const scrollChatToBottom = (scroller, { behavior = "smooth", force = false } = {
   })
 }
 
+const focusChatTarget = (scroller) => {
+  const target = [...scroller.querySelectorAll(chatFocusSelector)].find((message) => message.getClientRects().length)
+
+  if (!target) {
+    delete scroller.dataset.assemblyFocusedMessage
+    return
+  }
+
+  const messageId = target.dataset.assemblyMessageId
+  if (scroller.dataset.assemblyFocusedMessage === messageId) return
+  scroller.dataset.assemblyFocusedMessage = messageId
+
+  runAfterPaint(() => {
+    if (!target.isConnected || !target.matches(chatFocusSelector)) return
+
+    target.focus({ preventScroll: true })
+    target.scrollIntoView({ block: "nearest" })
+  })
+}
+
 const bindChatScroller = (scroller) => {
   if (scroller.dataset.assemblyChatScrollBound === "true") return
 
   scroller.dataset.assemblyChatScrollBound = "true"
   scroller.dataset.assemblyStickToBottom = "true"
-  scroller.dataset.assemblyMessageSignature = chatMessageSignature(scroller)
+  let tailKey = chatTailKey(scroller)
 
   scroller.addEventListener("scroll", () => {
     scroller.dataset.assemblyStickToBottom =
@@ -138,20 +163,88 @@ const bindChatScroller = (scroller) => {
   }, { passive: true })
 
   const observer = new MutationObserver(() => {
-    const nextSignature = chatMessageSignature(scroller)
+    focusChatTarget(scroller)
+    const nextTailKey = chatTailKey(scroller)
 
-    if (nextSignature === scroller.dataset.assemblyMessageSignature) return
+    if (nextTailKey === tailKey) return
 
-    scroller.dataset.assemblyMessageSignature = nextSignature
+    tailKey = nextTailKey
     scrollChatToBottom(scroller, { force: true })
   })
 
-  observer.observe(scroller, { childList: true, subtree: true })
+  observer.observe(scroller, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["data-assembly-focus-target", "data-assembly-room-id"]
+  })
+  focusChatTarget(scroller)
   scrollChatToBottom(scroller, { behavior: "auto", force: true })
+}
+
+let activeThreadDialog = null
+let threadOpener = null
+
+document.addEventListener("click", (event) => {
+  const opener = event.target.closest?.(threadTriggerSelector)
+  if (opener) threadOpener = opener
+}, true)
+
+// A same-URL navigation can restore Hologram's saved Board or inbox view.
+document.addEventListener("click", (event) => {
+  const link = event.target.closest?.("a[data-assembly-release-target]")
+  const dispatch = window.Hologram?.dispatchAction
+
+  if (!link || link.href !== window.location.href || !dispatch ||
+      event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+
+  const roomId = new URL(link.href).searchParams.get("room")
+  if (!roomId) return
+
+  event.preventDefault()
+  dispatch("select_search_result", "page", {
+    room_id: roomId,
+    message_id: link.dataset.assemblyReleaseTarget
+  })
+})
+
+const syncMobileThreadFocus = () => {
+  const current = document.querySelector(mobileThreadSelector)
+  const dialog = current?.getClientRects().length ? current : null
+  const previous = activeThreadDialog
+  activeThreadDialog = dialog
+
+  if (dialog === previous) return
+
+  if (dialog) {
+    runAfterPaint(() => {
+      if (activeThreadDialog === dialog && !dialog.querySelector(chatFocusSelector)) {
+        dialog.querySelector("[data-assembly-thread-close]")?.focus({ preventScroll: true })
+      }
+    })
+  } else if (previous && !previous.isConnected) {
+    const rootId = previous.dataset.assemblyThreadRoot
+    const opener = threadOpener
+    threadOpener = null
+
+    runAfterPaint(() => {
+      if (activeThreadDialog) return
+
+      const matches = (control) =>
+        control?.dataset.assemblyThreadTrigger === rootId && control.getClientRects().length
+      const trigger = matches(opener)
+        ? opener
+        : Array.from(document.querySelectorAll(threadTriggerSelector)).find(matches)
+
+      trigger?.focus({ preventScroll: true })
+    })
+  }
 }
 
 const bindChatScrollers = () => {
   document.querySelectorAll(chatScrollSelector).forEach(bindChatScroller)
+  document.querySelectorAll(`${mobileThreadSelector} ${threadScrollSelector}`).forEach(focusChatTarget)
+  syncMobileThreadFocus()
 }
 
 let chatScrollObserverStarted = false
@@ -167,7 +260,9 @@ const startChatScrollObserver = () => {
 
   new MutationObserver(bindChatScrollers).observe(root, {
     childList: true,
-    subtree: true
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["data-assembly-focus-target"]
   })
 }
 

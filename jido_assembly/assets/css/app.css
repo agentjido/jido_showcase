@@ -2,6 +2,7 @@
    https://tailwindcss.com/docs/configuration */
 
 @import "tailwindcss" source(none);
+@import "./assembly.css";
 @source "../css";
 @source "../js";
 @source "../../app";
@@ -105,46 +106,94 @@
 
 /* This file is for your main application CSS */
 
-:root {
-  color-scheme: dark;
-  --assembly-bg: oklch(20% 0.018 258);
-  --assembly-rail: oklch(25% 0.022 258);
-  --assembly-sidebar: oklch(28% 0.024 258);
-  --assembly-panel: oklch(96% 0.006 92);
-  --assembly-panel-muted: oklch(92% 0.009 92);
-  --assembly-ink: oklch(21% 0.017 258);
-  --assembly-muted: oklch(52% 0.02 258);
-  --assembly-line: oklch(84% 0.011 92);
-  --assembly-accent: oklch(65% 0.18 52);
-  --assembly-accent-strong: oklch(58% 0.18 45);
-  --assembly-green: oklch(67% 0.13 157);
-  --assembly-chat-bg: oklch(18% 0.012 258);
-  --assembly-chat-header: oklch(20% 0.013 258);
-  --assembly-chat-hover: oklch(24% 0.014 258);
-  --assembly-chat-raised: oklch(25% 0.014 258);
-  --assembly-chat-input: oklch(21% 0.012 258);
-  --assembly-chat-line: oklch(35% 0.014 258);
-  --assembly-chat-text: oklch(92% 0.007 258);
-  --assembly-chat-muted: oklch(70% 0.012 258);
-  --assembly-chat-subtle: oklch(56% 0.012 258);
-  --assembly-chat-pill: oklch(29% 0.014 258);
+.release-workspace {
+  --release-ink: #1e2a40;
+  --release-muted: #52637d;
+  --release-line: #dce3ed;
+  --release-accent: #284b90;
+  min-height: 100vh;
+  background: #fff;
+  color: var(--release-ink);
+  font: 15px/1.5 system-ui, sans-serif;
 }
 
-html,
-body {
-  min-height: 100%;
-  background: var(--assembly-bg);
-  color: var(--assembly-ink);
-  font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+.release-topbar, .release-people, .release-card-title, .release-actions, .release-sources {
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+  flex-wrap: wrap;
 }
 
-body {
-  margin: 0;
+.release-topbar {
+  justify-content: space-between;
+  padding: .75rem 1.25rem;
+  background: #222d49;
+  color: #fff;
 }
 
-button,
-input,
-textarea {
-  font: inherit;
+.release-topbar > a { font-weight: 750; }
+.release-people { font-size: .87rem; }
+.release-people a { padding: .2rem .48rem; border: 1px solid transparent; border-radius: .3rem; }
+.release-people a[aria-current] { border-color: #9cb4eb; background: #34436a; }
+.release-shell { display: grid; grid-template-columns: 208px minmax(0, 1fr); min-height: calc(100vh - 52px); }
+.release-nav { background: #eef2f8; border-right: 1px solid var(--release-line); padding: .9rem; }
+.release-nav nav, .release-list, .release-editor { display: grid; gap: .5rem; }
+.release-nav a { padding: .45rem .55rem; border-radius: .35rem; font-weight: 620; }
+.release-nav a[aria-current] { background: #dbe6fa; color: #234783; }
+.release-count { margin-left: .25rem; color: #70490a; font-size: .8rem; }
+.release-main { min-width: 0; padding: 1.35rem; }
+.release-main h1 { font-size: 1.35rem; line-height: 1.25; font-weight: 750; }
+.release-main h2 { font-size: 1rem; font-weight: 720; }
+.release-main h3 { font-size: .9rem; font-weight: 700; }
+.release-muted, .release-evidence p { color: var(--release-muted); font-size: .87rem; }
+.release-heading { margin-bottom: 1rem; }
+.release-channel { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 238px); gap: 1.25rem; }
+.release-conversation { min-width: 0; max-width: 54rem; }
+.release-message { display: grid; grid-template-columns: 2rem minmax(0, 1fr); gap: .65rem; }
+.release-avatar { display: grid; place-items: center; height: 2rem; border-radius: .4rem; background: #e1eafa; font-size: .75rem; font-weight: 720; }
+.release-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.release-run { padding: .85rem 0; border-top: 1px solid var(--release-line); }
+.release-thread { display: grid; gap: .6rem; margin: .6rem 0 0 1rem; padding-left: 1rem; border-left: 1px solid #c4d2e9; }
+.release-card, .release-item, .release-evidence { border: 1px solid var(--release-line); border-radius: .65rem; padding: .75rem; background: #f7f9fe; }
+.release-decision { background: #fff7e9; border-color: #e7d6b7; }
+.release-card-title { justify-content: space-between; margin-bottom: .35rem; }
+.release-card, .release-message, .release-evidence section { scroll-margin-block: 1rem; }
+.release-workspace :target { outline: 2px solid #5276be; outline-offset: 3px; }
+.release-workspace :focus-visible { outline: 2px solid #5276be; outline-offset: 2px; }
+.release-status { display: inline-block; width: fit-content; border-radius: .3rem; background: #e3ecfa; color: #264781; padding: .15rem .4rem; font-size: .75rem; font-weight: 670; }
+.release-status[data-status="decision"] { background: #f7e8c9; color: #70490a; }
+.release-status[data-status="reviewed"] { background: #e6f2e8; color: #24603a; }
+.release-sources, .release-assignee, .release-actions, .release-edit { margin-top: .55rem; }
+.release-sources a, .release-edit summary { color: var(--release-accent); text-decoration: underline; text-underline-offset: .15rem; }
+.release-assignee, .release-sources, .release-edit { font-size: .84rem; }
+.release-edit summary { cursor: pointer; width: fit-content; }
+.release-edit .release-editor { margin-top: .5rem; }
+.release-editor label { font-size: .85rem; font-weight: 670; }
+.release-editor textarea { width: 100%; padding: .5rem; border: 1px solid #aebdd2; border-radius: .4rem; background: #fff; resize: vertical; }
+.release-workspace button { width: fit-content; padding: .35rem .6rem; border: 1px solid #aebdd2; border-radius: .4rem; background: #fff; color: var(--release-ink); font-size: .84rem; font-weight: 670; cursor: pointer; }
+.release-workspace button:hover { background: #eaf0fc; }
+.release-workspace .release-primary { background: var(--release-accent); color: #fff; border-color: var(--release-accent); }
+.release-workspace .release-primary:hover { background: #1f3d79; }
+.release-composer { margin-top: .8rem; }
+.release-evidence { align-self: start; }
+.release-evidence h2:not(:first-child), .release-evidence section { margin-top: .65rem; }
+.release-board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .65rem; margin-top: .8rem; }
+.release-lane { border-radius: .6rem; padding: .55rem; background: #eef2f8; }
+.release-lane h2 { margin-bottom: .5rem; }
+.release-item { display: grid; gap: .35rem; overflow-wrap: anywhere; }
+.release-item:hover { border-color: #7992bf; }
+.release-main > .release-list { margin-top: .65rem; max-width: 46rem; }
+.release-empty, .release-error { padding: .6rem .7rem; margin: .5rem 0; border: 1px solid var(--release-line); border-radius: .4rem; }
+.release-error { background: #fff0ed; color: #842c23; }
+
+@media (max-width: 850px) {
+  .release-channel { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 630px) {
+  .release-shell { grid-template-columns: minmax(0, 1fr); }
+  .release-nav { border-right: 0; border-bottom: 1px solid var(--release-line); }
+  .release-nav nav { display: flex; flex-wrap: wrap; }
+  .release-main { padding: .9rem; }
+  .release-board { grid-template-columns: minmax(0, 1fr); }
 }

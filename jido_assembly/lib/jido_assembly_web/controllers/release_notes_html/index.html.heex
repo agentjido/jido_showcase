@@ -1,0 +1,208 @@
+<div class="release-workspace">
+  <header class="release-topbar">
+    <a href="/">Jido Assembly</a>
+    <nav :if={@demo_switcher} aria-label="View as" class="release-people">
+      <span>View as</span>
+      <a
+        :for={{id, name} <- ReleaseNotes.people()}
+        href={page_path(id, @view)}
+        aria-current={if id == @person, do: "true"}
+      >{name}</a>
+    </nav>
+  </header>
+  <div class="release-shell">
+    <aside class="release-nav">
+      <nav aria-label="Release workspace">
+        <a href={page_path(@person, "thread")} aria-current={if @view == "thread", do: "page"}>
+          # jido-chat-release
+        </a>
+        <a href={page_path(@person, "inbox")} aria-current={if @view == "inbox", do: "page"}>
+          Needs you <span :if={@inbox != []} class="release-count">{length(@inbox)}</span>
+        </a>
+        <a href={page_path(@person, "board")} aria-current={if @view == "board", do: "page"}>
+          Board
+        </a>
+      </nav>
+    </aside>
+    <main class="release-main">
+      <p :if={Phoenix.Flash.get(@flash, :error)} class="release-error" role="alert">
+        {Phoenix.Flash.get(@flash, :error)}
+      </p>
+      <%= case @view do %>
+        <% "inbox" -> %>
+          <h1>Needs you</h1>
+          <p class="release-muted">
+            Decisions and reviews assigned to {ReleaseNotes.name(@person)}.
+          </p>
+          <p :if={@inbox == []} class="release-empty">
+            You have no pending decisions or reviews.
+          </p>
+          <div class="release-list">
+            <.work_item :for={run <- @inbox} person={@person} run={run} />
+          </div>
+        <% "board" -> %>
+          <h1>Release board</h1>
+          <div class="release-board">
+            <section :for={status <- ReleaseNotes.board_lanes()} class="release-lane">
+              <h2>{ReleaseNotes.status_label(status)}</h2>
+              <% items = Enum.filter(@runs, &(&1.status == status)) %>
+              <p :if={items == []} class="release-muted">No requests</p>
+              <div class="release-list">
+                <.work_item :for={run <- items} person={@person} run={run} />
+              </div>
+            </section>
+          </div>
+        <% "thread" -> %>
+          <header class="release-heading">
+            <h1># jido-chat-release</h1>
+            <p class="release-muted">
+              Scripted Triage demo. Requests, edits, and reviews use sample data.
+            </p>
+          </header>
+          <div class="release-channel">
+            <div class="release-conversation">
+              <p :if={@runs == []} class="release-empty">
+                Ask Triage to draft a release note. The other teammate gets the first review.
+              </p>
+              <section :for={run <- @runs} class="release-run" aria-label="Triage thread">
+                <div class="release-message" id={ReleaseNotes.message_anchor(run.root.id)}>
+                  <span class="release-avatar" aria-hidden="true">{run.root.avatar}</span>
+                  <div>
+                    <strong>{run.root.author}</strong><p class="release-text">{run.root.body}</p>
+                  </div>
+                </div>
+                <div class="release-thread">
+                  <section
+                    class="release-card release-decision"
+                    id={ReleaseNotes.decision_anchor(run.id)}
+                  >
+                    <div class="release-card-title">
+                      <strong>Triage · Release criteria</strong>
+                      <span
+                        :if={run.status == :decision}
+                        class="release-status"
+                        data-status="decision"
+                      >
+                        {ReleaseNotes.name(run.assignee)}
+                      </span>
+                    </div>
+                    <%= case run.status do %>
+                      <% :starting -> %>
+                        <p>Triage is preparing the decision.</p>
+                      <% :drafting -> %>
+                        <p>Triage is preparing v1.</p>
+                      <% :decision -> %>
+                        <p>{run.decision_prompt}</p>
+                        <.form
+                          :if={run.assignee == @person}
+                          for={%{}}
+                          action={~p"/release-notes"}
+                          class="release-actions"
+                        >
+                          <.action_fields person={@person} run={run} operation="decide" />
+                          <button
+                            :for={{choice, label} <- ReleaseNotes.choices(run)}
+                            type="submit"
+                            name="choice"
+                            value={choice}
+                          >
+                            {label}
+                          </button>
+                        </.form>
+                      <% :cancelled -> %>
+                        <p>This release run is cancelled.</p>
+                      <% _status -> %>
+                        <p :if={is_nil(run.answer)}>
+                          {ReleaseNotes.name(run.requester)} chose: {hd(run.changes).data[
+                            "choice"
+                          ]}.
+                        </p>
+                    <% end %>
+                  </section>
+                  <article
+                    :if={run.cancellation}
+                    class="release-card"
+                    id={ReleaseNotes.message_anchor(run.cancellation.id)}
+                  >
+                    <p class="release-text">{run.cancellation.body}</p>
+                  </article>
+                  <article
+                    :if={run.answer}
+                    class="release-card"
+                    id={ReleaseNotes.message_anchor(run.answer.id)}
+                  >
+                    <div class="release-card-title">
+                      <strong>Decision answer</strong>
+                      <span class="release-muted">{run.answer.author}</span>
+                    </div>
+                    <p class="release-text">{run.answer.body}</p>
+                  </article>
+                  <article
+                    :for={change <- run.changes}
+                    class="release-card"
+                    id={ReleaseNotes.message_anchor(change.id)}
+                  >
+                    <div class="release-card-title">
+                      <strong>{change_heading(change.data)}</strong>
+                      <span class="release-muted">{change.author}</span>
+                    </div>
+                    <p class="release-text">{change.text}</p>
+                    <%= if change.data["type"] in ["draft", "revision"] do %>
+                      <div class="release-sources" aria-label="Sample sources">
+                        <a
+                          :for={{id, label, _text} <- ReleaseNotes.sources(change.data)}
+                          href={"#source-" <> id}
+                        >{label}</a>
+                      </div>
+                      <%= if run.status == :review and run.note.id == change.id do %>
+                        <p class="release-assignee">
+                          Review assigned to {ReleaseNotes.name(run.assignee)}.
+                        </p>
+                        <%= if run.assignee == @person do %>
+                          <.form for={%{}} action={~p"/release-notes"} class="release-actions">
+                            <.action_fields person={@person} run={run} operation="review" />
+                            <button type="submit" class="release-primary">Mark reviewed</button>
+                          </.form>
+                          <details class="release-edit">
+                            <summary>Suggest edit</summary>
+                            <.form for={%{}} action={~p"/release-notes"} class="release-editor">
+                              <.action_fields person={@person} run={run} operation="revise" />
+                              <label for={"edit-" <> change.id}>Revised release note</label>
+                              <textarea
+                                id={"edit-" <> change.id}
+                                name="body"
+                                rows="5"
+                                maxlength="2000"
+                                required
+                              >{change.text}</textarea>
+                              <button type="submit">Send revision</button>
+                            </.form>
+                          </details>
+                        <% end %>
+                      <% end %>
+                    <% end %>
+                  </article>
+                </div>
+              </section>
+              <.form for={%{}} action={~p"/release-notes"} class="release-composer release-editor">
+                <input type="hidden" name="as" value={@person} />
+                <input type="hidden" name="operation" value="request" />
+                <label for="release-request">Message as {ReleaseNotes.name(@person)}</label>
+                <textarea id="release-request" name="body" rows="2" maxlength="2000" required>@triage Draft the Jido Chat V3 release note.</textarea>
+                <button type="submit" class="release-primary">Send to Triage</button>
+              </.form>
+            </div>
+            <aside class="release-evidence" aria-label="Triage and sources">
+              <h2>Triage</h2>
+              <p>Drafts a note from the sample sources and asks a teammate to review it.</p>
+              <h2>Sample sources</h2>
+              <section :for={{id, label, text} <- ReleaseNotes.sources()} id={"source-" <> id}>
+                <h3>{label}</h3>
+                <p>{text}</p>
+              </section>
+            </aside>
+          </div>
+      <% end %>
+    </main>
+  </div>
+</div>

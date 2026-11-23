@@ -8,7 +8,8 @@ defmodule Jido.AssemblyWeb.Endpoint do
     store: :cookie,
     key: "_jido_assembly_key",
     signing_salt: "F7FBmefy",
-    same_site: "Lax"
+    same_site: "Lax",
+    secure: Mix.env() == :prod
   ]
 
   # socket "/live", Phoenix.LiveView.Socket,
@@ -46,6 +47,7 @@ defmodule Jido.AssemblyWeb.Endpoint do
   plug Plug.MethodOverride
   plug Plug.Head
   plug Plug.Session, @session_options
+  plug Jido.AssemblyWeb.PilotAccess
   plug :maybe_hologram_router
   plug Jido.AssemblyWeb.Router
 

@@ -1,0 +1,261 @@
+.assembly-app {
+  color-scheme: light;
+  --assembly-bg: #fff;
+  --assembly-navy: #222d49;
+  --assembly-sidebar: #eef2f8;
+  --assembly-panel: #f8faff;
+  --assembly-panel-muted: #eef2f8;
+  --assembly-ink: #1e2a40;
+  --assembly-muted: #54637a;
+  --assembly-line: #dce3ed;
+  --assembly-accent: #294e9d;
+  --assembly-accent-strong: #203e82;
+  --assembly-green: #397354;
+  --assembly-selected: #dae5fa;
+  --assembly-warm: #fff5e2;
+  --assembly-warm-ink: #754907;
+  --assembly-chat-bg: var(--assembly-bg);
+  --assembly-chat-hover: #f8faff;
+  --assembly-chat-raised: #f5f8ff;
+  --assembly-chat-input: var(--assembly-bg);
+  --assembly-chat-line: var(--assembly-line);
+  --assembly-chat-text: var(--assembly-ink);
+  --assembly-chat-muted: var(--assembly-muted);
+  --assembly-chat-subtle: var(--assembly-muted);
+  --assembly-chat-pill: #eaf0fa;
+  --assembly-content-padding: 22px;
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  min-height: 380px;
+  background: var(--assembly-bg);
+  color: var(--assembly-ink);
+  caret-color: var(--assembly-accent);
+  font: 15px/1.48 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.assembly-app :focus-visible {
+  outline: 2px solid var(--assembly-accent);
+  outline-offset: 2px;
+}
+.assembly-app ::selection { background: var(--assembly-selected); color: var(--assembly-ink); }
+.assembly-app button { cursor: pointer; }
+.assembly-app button:disabled { opacity: .6; cursor: wait; }
+.assembly-muted { color: var(--assembly-muted); }
+
+.assembly-topbar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 51px;
+  padding: 0 var(--assembly-content-padding);
+  background: var(--assembly-navy);
+  color: #fff;
+}
+.assembly-topbar :focus-visible { outline-color: #c6d7ff; }
+.assembly-brand { display: inline-flex; align-items: center; gap: 10px; padding-block: 6px; font-size: 1.07em; font-weight: 730; }
+.assembly-mark { display: grid; grid: repeat(2, 7px) / repeat(2, 7px); gap: 3px; transform: rotate(-10deg); }
+.assembly-mark i { background: #becfff; border-radius: 2px; }
+.assembly-mark i:nth-child(2) { opacity: .5; }
+.assembly-mark i:nth-child(3) { opacity: .72; }
+.assembly-top-tools, .assembly-viewer { display: flex; align-items: center; gap: 9px; }
+.assembly-sign-out { color: inherit; text-decoration: underline; }
+.assembly-sign-out:hover { color: #c6d7ff; }
+.assembly-demo-label, .assembly-viewer { color: #d7e1f7; font-size: .85em; }
+.assembly-viewer select, .assembly-inspector-trigger {
+  min-height: 33px;
+  padding: 3px 7px;
+  border: 1px solid #66779e;
+  border-radius: 6px;
+  background: #303e60;
+  color: #fff;
+  cursor: pointer;
+}
+.assembly-inspector-trigger { display: grid; place-items: center; width: 33px; padding: 0; }
+.assembly-inspector-trigger:hover { background: #415278; }
+
+.assembly-shell { display: grid; grid-template-columns: 232px minmax(0, 1fr); flex: 1; min-height: 0; }
+.assembly-sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 12px 14px;
+  background: var(--assembly-sidebar);
+  border-right: 1px solid var(--assembly-line);
+}
+.assembly-workspace-name { display: flex; align-items: center; gap: 10px; padding: 14px 8px; margin-bottom: 12px; border-bottom: 1px solid var(--assembly-line); }
+.assembly-workspace-avatar { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; background: #d9e3f6; color: #324e87; font-weight: 750; }
+.assembly-nav, .assembly-room-links { display: grid; gap: 3px; }
+.assembly-nav-link, .assembly-room-link {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  color: #394963;
+  text-align: left;
+}
+.assembly-nav-link { justify-content: space-between; font-size: .95em; font-weight: 570; }
+.assembly-room-link { font-size: .92em; }
+.assembly-nav-link:hover, .assembly-room-link:hover { background: #e2e9f3; }
+.assembly-sidebar [aria-current="page"] { background: var(--assembly-selected); color: #204687; font-weight: 730; }
+.assembly-count { margin-left: auto; min-width: 20px; padding-inline: 5px; border-radius: 9px; background: #f3dfb7; color: var(--assembly-warm-ink); text-align: center; font-size: .78em; }
+.assembly-channels { margin-block: 20px 15px; }
+.assembly-nav-heading { display: flex; align-items: center; justify-content: space-between; padding-inline: 9px 3px; color: var(--assembly-muted); font-size: .84em; font-weight: 650; }
+.assembly-direct-messages { padding-inline: 9px; color: var(--assembly-muted); font-size: .87em; }
+.assembly-direct-messages summary { cursor: pointer; font-weight: 650; }
+.assembly-direct-messages .assembly-room-links { margin-top: 4px; }
+.assembly-online { position: absolute; right: -2px; bottom: -2px; width: 8px; height: 8px; border: 1px solid white; border-radius: 50%; background: var(--assembly-green); }
+.assembly-sidebar-footer { display: grid; gap: 9px; margin-top: auto; padding: 12px 8px 0; border-top: 1px solid var(--assembly-line); }
+.assembly-search { min-width: 0; border: 1px solid #b9c7dc; border-radius: 6px; background: white; padding: 6px 8px; font-size: .88em; }
+
+.assembly-main, .assembly-conversation { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.assembly-channel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 54px; padding: 9px var(--assembly-content-padding); border-bottom: 1px solid var(--assembly-line); }
+.assembly-channel-head h1 { font-size: 1.15em; font-weight: 730; overflow-wrap: anywhere; }
+.assembly-text-link, .assembly-source summary { color: var(--assembly-accent); font-size: .86em; font-weight: 650; text-decoration: underline; text-underline-offset: 3px; }
+.assembly-text-link:hover { color: var(--assembly-accent-strong); }
+.assembly-channel-head > a { flex: none; }
+.assembly-conversation-grid { display: grid; grid-template-columns: minmax(0, 1fr) 278px; flex: 1; min-height: 0; }
+.assembly-conversation-grid[data-show-agents="false"] { grid-template-columns: minmax(0, 1fr); }
+.assembly-conversation-grid[data-show-agents="false"] .assembly-composer-actions { justify-content: flex-end; }
+.assembly-chat-scroll { flex: 1; min-height: 0; overflow: auto; scrollbar-color: #b7c4d8 transparent; }
+.assembly-thread-heading { padding: 23px var(--assembly-content-padding) 11px; }
+.assembly-thread-heading h2, .assembly-work-head h1 { font-size: 1.49em; line-height: 1.25; letter-spacing: -.025em; font-weight: 730; }
+.assembly-thread-heading p, .assembly-work-head p { margin-top: 4px; color: var(--assembly-muted); max-width: 62ch; }
+.assembly-ops { margin-top: 10px; font-size: .86em; }
+.assembly-ops > summary { cursor: pointer; width: fit-content; color: var(--assembly-accent); font-weight: 650; }
+.assembly-ops > summary:hover { text-decoration: underline; }
+.assembly-timeline { padding: 0 var(--assembly-content-padding) 16px; }
+.assembly-divider { display: flex; align-items: center; gap: 11px; margin: 6px 0 9px; color: var(--assembly-muted); font-size: .83em; font-weight: 650; }
+.assembly-divider::after { content: ""; height: 1px; background: var(--assembly-line); flex: 1; }
+
+.assembly-message { position: relative; display: grid; grid-template-columns: 35px minmax(0, 1fr); gap: 10px; padding: 7px 0 10px; scroll-margin-block: 12px; }
+.assembly-message[data-assembly-focus-target="true"]:focus { border-radius: 6px; outline: 2px solid #5877b4; outline-offset: 2px; }
+.assembly-message-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px; min-height: 20px; }
+.assembly-time { color: var(--assembly-muted); font-size: .82em; font-variant-numeric: tabular-nums; }
+.assembly-time:hover { text-decoration: underline; }
+.assembly-avatar { display: grid; place-items: center; width: 33px; height: 33px; border-radius: 8px; background: #e2e9fb; color: #2e4d93; font-size: .78em; font-weight: 750; }
+.assembly-avatar[data-sender="user:eli"] { background: #efdfd8; color: #754e3c; }
+.assembly-avatar[data-role="Agent"] { background: #dcebfa; color: #234b84; }
+.assembly-agent-label { border-radius: 4px; padding: 1px 5px; background: #edf3fc; color: #304f88; font-size: .74em; font-weight: 680; }
+.assembly-message-tools { position: absolute; right: 0; top: 0; display: flex; align-items: center; gap: 2px; opacity: 0; padding: 3px; border: 1px solid var(--assembly-line); border-radius: 8px; background: white; }
+.assembly-room-message:hover .assembly-message-tools, .assembly-room-message:focus-within .assembly-message-tools { opacity: 1; }
+.assembly-thread-link { display: inline-flex; align-items: center; gap: 5px; margin-top: 5px; color: var(--assembly-accent); font-size: .84em; font-weight: 680; }
+.assembly-thread-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.assembly-thread-inline { margin: 0 0 16px 45px; padding: 3px 0 4px 12px; border-left: 1px solid #bdcbe3; }
+.assembly-thread-mobile { display: none; }
+.assembly-thread-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--assembly-accent); font-size: .88em; font-weight: 680; }
+.assembly-thread-actions { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.assembly-thread-footer { padding-top: 6px; }
+
+.assembly-composer-wrap { flex: none; padding: 10px var(--assembly-content-padding) 17px; background: white; }
+.assembly-composer { border: 1px solid #aebdd2; border-radius: 9px; background: white; }
+.assembly-composer:focus-within { border-color: #6285c5; box-shadow: 0 0 0 2px #e0e8f9; }
+.assembly-composer input { display: block; width: 100%; min-width: 0; min-height: 49px; padding: 9px 10px; }
+.assembly-composer input::placeholder { color: var(--assembly-muted); }
+.assembly-composer input:focus-visible { outline: 0; }
+.assembly-composer-actions { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 8px; border-top: 1px solid var(--assembly-line); border-radius: 0 0 8px 8px; background: var(--assembly-panel); }
+.assembly-composer-actions > .assembly-text-link { padding-inline: 5px; text-decoration: none; }
+.assembly-reply-composer { display: flex; align-items: center; gap: 4px; max-width: 660px; padding-right: 6px; }
+.assembly-reply-composer input { min-height: 39px; flex: 1; }
+
+.assembly-button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 32px; padding: 5px 10px; border: 1px solid #b9c7dc; border-radius: 6px; background: white; color: var(--assembly-ink); font-size: .85em; font-weight: 670; }
+.assembly-button:hover, .assembly-icon-button:hover { background: #eaf0fc; }
+.assembly-primary { background: var(--assembly-accent); border-color: var(--assembly-accent); color: white; }
+.assembly-primary:hover { background: var(--assembly-accent-strong); }
+.assembly-icon-button { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 6px; color: var(--assembly-muted); }
+
+.assembly-run-details { min-height: 0; overflow: auto; padding: 17px; background: var(--assembly-panel); border-left: 1px solid var(--assembly-line); scrollbar-color: #b7c4d8 transparent; }
+.assembly-run-details section + section { margin-top: 17px; padding-top: 15px; border-top: 1px solid var(--assembly-line); }
+.assembly-run-details h2 { margin-bottom: 8px; font-size: 1.07em; font-weight: 720; }
+.assembly-run-details p { color: var(--assembly-muted); font-size: .88em; overflow-wrap: anywhere; }
+.assembly-run-details p + p { margin-top: 4px; }
+.assembly-run-details p strong { color: var(--assembly-ink); }
+.assembly-agent-summary { display: flex; align-items: center; gap: 9px; margin: 11px 0; }
+.assembly-agent-summary strong, .assembly-agent-summary small { display: block; }
+.assembly-agent-summary strong { font-size: .92em; }
+.assembly-agent-summary small { color: var(--assembly-muted); font-size: .82em; }
+.assembly-status { display: inline-block; width: fit-content; padding: 3px 7px; border-radius: 5px; background: #eaf0fa; color: #3e526f; font-size: .8em; font-weight: 680; }
+.assembly-status[data-stage="decision"] { background: #f8e8c8; color: var(--assembly-warm-ink); }
+.assembly-status[data-stage="reviewed"] { background: #e2f0e7; color: #2d654a; }
+.assembly-run-note { margin-top: 7px; }
+.assembly-steps { margin-top: 8px; }
+.assembly-steps li { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; color: var(--assembly-muted); font-size: .86em; }
+.assembly-steps li::before { content: ""; flex: 0 0 9px; height: 9px; margin-inline: 2px; border: 1px solid #8293ae; border-radius: 50%; }
+.assembly-steps [aria-current="step"] { color: var(--assembly-ink); font-weight: 700; }
+.assembly-steps [aria-current="step"]::before { background: var(--assembly-accent); border-color: var(--assembly-accent); outline: 2px solid var(--assembly-selected); }
+.assembly-source { border-bottom: 1px solid var(--assembly-line); padding: 6px 0; }
+.assembly-source summary { cursor: pointer; text-decoration: none; }
+.assembly-source p { margin-block: 4px; }
+
+.assembly-agent-card { max-width: 660px; padding: 11px 13px; margin: 5px 0 1px; border: 1px solid #cbd8ee; border-radius: 12px; background: #f5f8ff; font-size: .93em; }
+.assembly-decision[data-pending="true"] { border-color: #ead7b2; border-left: 4px solid #b9802f; padding-left: 10px; background: var(--assembly-warm); }
+.assembly-decision[data-pending="true"] .assembly-card-heading > span { color: var(--assembly-warm-ink); }
+.assembly-result[data-current="true"] { border-left: 4px solid var(--assembly-accent); padding-left: 10px; }
+.assembly-card-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 3px 8px; margin-bottom: 5px; }
+.assembly-card-heading > span { color: var(--assembly-muted); font-size: .84em; }
+.assembly-note-body { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.assembly-work-view { min-height: 0; overflow: auto; padding: 23px; }
+.assembly-work-head { margin-bottom: 20px; }
+.assembly-work-list { display: grid; gap: 9px; max-width: 760px; }
+.assembly-work-item { display: grid; gap: 5px; padding: 12px 14px; border: 1px solid var(--assembly-line); border-radius: 10px; background: white; color: var(--assembly-ink); text-align: left; overflow-wrap: anywhere; }
+.assembly-work-item:hover { border-color: #93a8cc; background: var(--assembly-panel); }
+.assembly-work-item > span { color: var(--assembly-muted); font-size: .9em; }
+.assembly-work-item > .assembly-room-label { font-size: .82em; }
+.assembly-board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.assembly-lane { min-height: 170px; padding: 10px; border-radius: 10px; background: var(--assembly-sidebar); font-size: .92em; }
+.assembly-lane h2 { display: flex; justify-content: space-between; gap: 5px; margin-bottom: 8px; font-weight: 700; }
+.assembly-lane .assembly-work-item { padding: 9px; }
+.assembly-lane .assembly-work-item + .assembly-work-item { margin-top: 7px; }
+
+.assembly-overlay { position: fixed; inset: 0; z-index: 50; }
+.assembly-overlay-backdrop { position: absolute; inset: 0; width: 100%; background: #222d4970; }
+.assembly-inspector { position: absolute; inset: 0 0 0 auto; display: flex; width: min(92vw, 420px); flex-direction: column; border-left: 1px solid var(--assembly-line); background: var(--assembly-panel); box-shadow: -8px 0 32px #222d4926; }
+.assembly-inspector-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 16px 20px; border-bottom: 1px solid var(--assembly-line); }
+
+@media (max-width: 1080px) {
+  .assembly-shell { grid-template-columns: 194px minmax(0, 1fr); }
+  .assembly-conversation-grid { grid-template-columns: minmax(0, 1fr) 225px; }
+  .assembly-board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 820px) {
+  .assembly-app { --assembly-content-padding: 15px; }
+  .assembly-shell { grid-template-columns: 175px minmax(0, 1fr); }
+  .assembly-conversation-grid { display: block; overflow: auto; }
+  .assembly-conversation { min-height: max(56vh, 280px); }
+  .assembly-chat-scroll { overflow: visible; }
+  .assembly-composer-wrap { position: sticky; bottom: 0; z-index: 2; }
+  .assembly-run-details { border-left: 0; border-top: 1px solid var(--assembly-line); }
+}
+
+@media (max-width: 600px) {
+  .assembly-shell { display: flex; flex-direction: column; }
+  .assembly-top-tools, .assembly-viewer { gap: 6px; }
+  .assembly-demo-label, .assembly-workspace-name, .assembly-nav-heading h2 { display: none; }
+  .assembly-sidebar { flex: none; min-height: auto; padding: 5px 9px; border-right: 0; border-bottom: 1px solid var(--assembly-line); }
+  .assembly-nav, .assembly-room-links { display: flex; overflow-x: auto; }
+  .assembly-nav-link, .assembly-room-link { flex: 0 0 auto; width: auto; min-height: 35px; }
+  .assembly-channels { position: relative; margin: 2px 0; padding-right: 29px; }
+  .assembly-nav-heading { position: absolute; top: 4px; right: 0; padding: 0; }
+  .assembly-sidebar-footer { grid-template-columns: minmax(0, 1fr) auto; align-items: center; margin-top: 5px; padding: 5px 1px 0; }
+  .assembly-sidebar-footer > div { grid-column: 1 / -1; }
+  .assembly-main { flex: 1; }
+  .assembly-conversation-grid { flex: 1; }
+  .assembly-conversation { min-height: 100%; }
+  .assembly-chat-scroll { flex-basis: 0; overflow: auto; }
+  .assembly-conversation-grid:has(.assembly-run-details:target) .assembly-conversation { min-height: max(45vh, 240px); }
+  .assembly-message-tools { position: static; grid-column: 2; width: fit-content; opacity: 1; padding: 0; border: 0; }
+  .assembly-thread-inline { display: none; }
+  .assembly-thread-mobile { display: flex; flex-direction: column; position: fixed; inset: auto 0 0; z-index: 30; max-height: 82dvh; border-top: 1px solid #b9c7dc; background: white; box-shadow: 0 -8px 32px #222d4926; }
+  .assembly-thread-mobile .assembly-thread-head, .assembly-thread-footer { padding: 8px 15px; }
+  .assembly-thread-mobile .assembly-thread-messages { overflow: auto; padding: 0 15px; }
+  .assembly-thread-mobile .assembly-thread-footer { border-top: 1px solid var(--assembly-line); }
+  .assembly-board { grid-template-columns: minmax(0, 1fr); }
+  .assembly-lane { min-height: 0; }
+}

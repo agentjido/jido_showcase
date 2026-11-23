@@ -80,7 +80,7 @@ defmodule Jido.Assembly.Components.Assembly.MobileWorkspacePanel do
                       <button
                         class="w-full rounded-md px-2 py-2 text-left transition hover:bg-white/8"
                         type="button"
-                        $click={:select_search_result, room_id: result.room_id, thread_id: result.thread_id}
+                        $click={:select_search_result, room_id: result.room_id, thread_id: result.thread_id, message_id: result.message_id}
                       >
                         <span class="block truncate text-xs font-bold text-stone-200">{result.room_label} · {result.author}</span>
                         <span class="block truncate text-xs text-stone-400">{result.body}</span>

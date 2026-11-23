@@ -7,14 +7,15 @@ defmodule Jido.Assembly.Chat do
   """
 
   alias Jido.Assembly.Chat.{Mentions, Projections}
-  alias Jido.Assembly.{Bridges, ChatRuntime, Inspector, Presence, Seeds}
-  alias Jido.Chat.Actor
+  alias Jido.Assembly.{Bridges, ChatRuntime, Inspector, Pilot, Presence, ReleaseNotes, Seeds}
+  alias Jido.Chat.{Actor, Content, FileSource, Media, Post}
   alias Jido.Chat.Runtime.Room.Reaction
 
   alias Jido.Chat.Runtime.Signal.Room.{AddReaction, Join, RemoveReaction}
   alias Jido.Chat.Runtime.Signal.Room.Post, as: PostSignal
 
   @room_definition "assembly.room.v1"
+  @max_attachment_bytes 1_048_576
 
   def workspace_id, do: Seeds.workspace_id()
   def current_user_id, do: Seeds.current_user_id()
@@ -25,7 +26,11 @@ defmodule Jido.Assembly.Chat do
   def connector_snapshot(room_id \\ Seeds.default_room_id()), do: Bridges.snapshot(room_id)
 
   def demo_users(presence \\ presence_snapshot()) do
-    apply_people_presence(Seeds.demo_users(), Map.get(presence, :online_user_ids, []))
+    if Pilot.enabled?() do
+      []
+    else
+      apply_people_presence(Seeds.demo_users(), Map.get(presence, :online_user_ids, []))
+    end
   end
 
   def current_user(user_id \\ Seeds.current_user_id(), presence \\ presence_snapshot()) do
@@ -36,7 +41,7 @@ defmodule Jido.Assembly.Chat do
     ensure_seeded!()
 
     presence = presence_snapshot()
-    rooms = Projections.room_views(presence)
+    rooms = Projections.room_views(presence, user_id)
     {channels, direct_messages} = Projections.split_rooms(rooms)
 
     active_room =
@@ -44,12 +49,15 @@ defmodule Jido.Assembly.Chat do
         Enum.find(rooms, &(&1.id == Seeds.default_room_id())) || List.first(rooms)
 
     if active_room do
-      {messages_by_room, threads_by_room} = project_room_data(rooms, user_id, presence)
+      {messages_by_room, threads_by_room, history_cursors} =
+        project_room_data(rooms, user_id, presence)
+
       messages = Map.get(messages_by_room, active_room.id, [])
 
       %{
         workspace: %{id: Seeds.workspace_id(), name: Seeds.workspace_name()},
         current_user: current_user(user_id, presence),
+        release_work: ReleaseNotes.work_view(user_id),
         demo_users: demo_users(presence),
         presence: presence,
         reaction_options: reaction_options(),
@@ -58,6 +66,7 @@ defmodule Jido.Assembly.Chat do
         direct_messages: direct_messages,
         messages_by_room: messages_by_room,
         threads_by_room: threads_by_room,
+        history_cursors: history_cursors,
         active_room: active_room,
         active_room_id: active_room.id,
         active_room_name: active_room.name,
@@ -102,6 +111,43 @@ defmodule Jido.Assembly.Chat do
     Projections.list_thread_views(room_id, root_message_id, user_id, presence_snapshot())
   end
 
+  @doc "Returns the timeline and threads for one room."
+  def room_conversation(room_id, user_id) do
+    ensure_seeded!()
+    Projections.room_message_data(room_id, user_id, presence_snapshot())
+  end
+
+  def room_history_page(room_id, user_id, before \\ nil) do
+    if room_visible?(room_id, user_id) do
+      Projections.history_page(room_id, user_id, presence_snapshot(), before)
+    else
+      {:error, :not_found}
+    end
+  end
+
+  def linked_history(room_id, message_id, user_id) do
+    if room_visible?(room_id, user_id) do
+      Projections.linked_history(room_id, message_id, user_id, presence_snapshot())
+    else
+      {:error, :not_found}
+    end
+  end
+
+  def room_visible?(room_id, user_id) do
+    case ChatRuntime.get_room(room_id) do
+      {:ok, room} -> Projections.room_visible?(room, user_id)
+      _ -> false
+    end
+  end
+
+  def room_topic(room_id) do
+    case ChatRuntime.get_room(room_id) do
+      {:ok, %{kind: :direct}} -> {:direct_room, room_id}
+      {:ok, _room} -> {:workspace, workspace_id()}
+      _ -> nil
+    end
+  end
+
   def send_message(room_id, body, sender_id \\ Seeds.current_user_id(), opts \\ []) do
     case send_message_command(room_id, body, sender_id, opts) do
       {:ok, message, _signals} -> {:ok, message}
@@ -111,23 +157,72 @@ defmodule Jido.Assembly.Chat do
 
   def send_message_command(room_id, body, sender_id \\ Seeds.current_user_id(), opts \\ [])
       when is_binary(room_id) do
-    ensure_seeded!()
     body = body |> to_string() |> String.trim()
 
     if body == "" do
       {:error, :empty_message}
     else
-      with {:ok, _room} <- ChatRuntime.get_room(room_id),
-           :ok <- ensure_thread(room_id, opts[:thread_id]),
-           {:ok, result} <- post(room_id, body, sender_id, opts),
-           {:ok, record} <- ChatRuntime.get_room_history(room_id, reply_message_id(result)) do
-        {:ok,
-         Projections.message_view_with_reply_count(
-           message_record(record),
-           sender_id,
-           presence_snapshot()
-         ), committed_signals(result)}
+      send_post(room_id, body, [Content.text(body)], sender_id, opts)
+    end
+  end
+
+  @doc "Stores a small attachment and optional caption as one durable chat post."
+  def send_attachment(room_id, attachment, sender_id \\ Seeds.current_user_id(), opts \\ [])
+
+  def send_attachment(
+        room_id,
+        %{filename: filename, media_type: media_type, bytes: bytes},
+        sender_id,
+        opts
+      )
+      when is_binary(room_id) and is_binary(filename) and is_binary(media_type) and
+             is_binary(bytes) and byte_size(bytes) in 1..@max_attachment_bytes do
+    filename = String.trim(filename)
+
+    if valid_attachment_name?(filename) and Regex.match?(~r/^[\w.+-]+\/[\w.+-]+$/u, media_type) do
+      caption = opts |> Keyword.get(:caption, "") |> to_string() |> String.trim()
+      source = FileSource.base64(Base.encode64(bytes), filename, media_type: media_type)
+
+      media =
+        Media.new(%{
+          kind: :file,
+          source: source,
+          name: filename,
+          media_type: media_type,
+          metadata: %{"size_bytes" => byte_size(bytes)}
+        })
+
+      content = if caption == "", do: [], else: [Content.text(caption)]
+
+      case send_post(room_id, caption, content ++ [Content.media(media)], sender_id, opts) do
+        {:ok, message, _signals} -> {:ok, message}
+        {:error, _reason} = error -> error
       end
+    else
+      {:error, :invalid_attachment}
+    end
+  end
+
+  def send_attachment(_room_id, _attachment, _sender_id, _opts), do: {:error, :invalid_attachment}
+
+  defp valid_attachment_name?(filename) do
+    filename not in ["", ".", ".."] and byte_size(filename) <= 255 and
+      not String.match?(filename, ~r/[[:cntrl:]\/\\]/u)
+  end
+
+  defp send_post(room_id, body, content, sender_id, opts) do
+    ensure_seeded!()
+
+    with {:ok, _room} <- ChatRuntime.get_room(room_id),
+         :ok <- ensure_thread(room_id, opts[:thread_id], opts[:reply_to_id]),
+         {:ok, result} <- post(room_id, body, content, sender_id, opts),
+         {:ok, record} <- ChatRuntime.get_room_history(room_id, reply_message_id(result)) do
+      {:ok,
+       Projections.message_view_with_reply_count(
+         message_record(record),
+         sender_id,
+         presence_snapshot()
+       ), committed_signals(result)}
     end
   end
 
@@ -144,15 +239,30 @@ defmodule Jido.Assembly.Chat do
 
     with {:ok, record} <- find_history(message_id),
          {:ok, current} <-
-           ChatRuntime.get_room_reaction(record.room_id, message_id, emoji, user_id),
-         module =
-           if(match?(%Reaction{status: :active}, current), do: RemoveReaction, else: AddReaction),
-         request <- module.new!(%{"message_id" => message_id, "reaction" => emoji}),
-         {:ok, result} <- room_call(record.room_id, request, user_id),
-         {:ok, stored} <- ChatRuntime.get_room_history(record.room_id, message_id) do
+           ChatRuntime.get_room_reaction(record.room_id, message_id, emoji, user_id) do
+      persist_reaction(record, emoji, user_id, not match?(%Reaction{status: :active}, current))
+    end
+  end
+
+  def set_reaction_command(message_id, emoji, user_id, active?) when is_boolean(active?) do
+    ensure_seeded!()
+
+    with {:ok, record} <- find_history(message_id) do
+      persist_reaction(record, emoji, user_id, active?)
+    end
+  end
+
+  def set_reaction_command(_message_id, _emoji, _user_id, _active?),
+    do: {:error, :invalid_reaction}
+
+  defp persist_reaction(record, emoji, user_id, active?) do
+    module = if active?, do: AddReaction, else: RemoveReaction
+
+    with {:ok, request} <- module.new(%{"message_id" => record.message_id, "reaction" => emoji}),
+         {:ok, result} <- room_call(record.room_id, request, user_id) do
       {:ok,
        Projections.message_view_with_reply_count(
-         message_record(stored),
+         message_record(record),
          user_id,
          presence_snapshot()
        ), committed_signals(result)}
@@ -188,7 +298,7 @@ defmodule Jido.Assembly.Chat do
 
       member_ids =
         Enum.uniq(
-          Seeds.demo_user_ids() ++
+          Enum.map(channel_people(), & &1.id) ++
             Enum.map(Seeds.agent_people(), & &1.id) ++
             [Seeds.system_user_id()]
         )
@@ -223,6 +333,8 @@ defmodule Jido.Assembly.Chat do
     end
   end
 
+  defp channel_people, do: if(Pilot.enabled?(), do: Pilot.people(), else: Seeds.demo_users())
+
   def room_views do
     ensure_seeded!()
     Projections.room_views(presence_snapshot())
@@ -233,12 +345,13 @@ defmodule Jido.Assembly.Chat do
   def error_to_string(:empty_message), do: "Type a message first."
   def error_to_string(:empty_name), do: "Name the group chat first."
   def error_to_string(:not_found), do: "That room is no longer available."
+  def error_to_string(:invalid_thread), do: "That reply does not belong to this thread."
   def error_to_string(reason), do: "Something went wrong: #{inspect(reason)}"
 
   @doc false
   defdelegate message_record(record), to: Projections
 
-  defp post(room_id, body, sender_id, opts) do
+  defp post(room_id, body, content, sender_id, opts) do
     role = Keyword.get(opts, :role, :user)
 
     metadata =
@@ -252,18 +365,21 @@ defmodule Jido.Assembly.Chat do
       |> put_origin(sender_id, role)
 
     post =
-      Jido.Chat.Post.text(body,
+      Post.new(%{
+        content: content,
         thread_id: opts[:thread_id],
         reply_to_id: opts[:reply_to_id] || opts[:thread_id],
         mentions: Mentions.mentioned_user_ids(body),
         metadata: metadata
-      )
+      })
+
+    signal_opts = if opts[:message_id], do: [id: opts[:message_id]], else: []
 
     request =
-      PostSignal.new!(%{
-        "post" => Jido.Chat.Post.to_map(post),
-        "mentions" => post.mentions
-      })
+      PostSignal.new!(
+        %{"post" => Post.to_map(post), "mentions" => post.mentions},
+        signal_opts
+      )
 
     room_call(room_id, request, sender_id)
   end
@@ -308,12 +424,32 @@ defmodule Jido.Assembly.Chat do
     end)
   end
 
-  defp ensure_thread(_room_id, nil), do: :ok
+  defp ensure_thread(_room_id, nil, nil), do: :ok
+  defp ensure_thread(_room_id, nil, _parent_id), do: {:error, :invalid_thread}
 
-  defp ensure_thread(room_id, root_message_id) do
-    case ChatRuntime.get_room_history(room_id, root_message_id) do
-      {:ok, %Jido.Chat.Runtime.Room.HistoryRecord{}} -> :ok
-      {:ok, nil} -> {:error, :not_found}
+  defp ensure_thread(room_id, root_id, parent_id) do
+    case ChatRuntime.get_room_history(room_id, root_id) do
+      {:ok, %Jido.Chat.Runtime.Room.HistoryRecord{thread_id: nil}} ->
+        ensure_thread_parent(room_id, root_id, parent_id)
+
+      {:ok, %Jido.Chat.Runtime.Room.HistoryRecord{}} ->
+        {:error, :invalid_thread}
+
+      {:ok, nil} ->
+        {:error, :not_found}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp ensure_thread_parent(_room_id, _root_id, nil), do: :ok
+  defp ensure_thread_parent(_room_id, root_id, root_id), do: :ok
+
+  defp ensure_thread_parent(room_id, root_id, parent_id) do
+    case ChatRuntime.get_room_history(room_id, parent_id) do
+      {:ok, %Jido.Chat.Runtime.Room.HistoryRecord{thread_id: ^root_id}} -> :ok
+      {:ok, _other} -> {:error, :invalid_thread}
       {:error, reason} -> {:error, reason}
     end
   end
@@ -357,9 +493,15 @@ defmodule Jido.Assembly.Chat do
   end
 
   defp project_room_data(rooms, user_id, presence) do
-    Enum.reduce(rooms, {%{}, %{}}, fn room, {messages_acc, threads_acc} ->
-      {messages, threads} = Projections.room_message_data(room.id, user_id, presence)
-      {Map.put(messages_acc, room.id, messages), Map.put(threads_acc, room.id, threads)}
+    Enum.reduce(rooms, {%{}, %{}, %{}}, fn room, {messages, threads, cursors} = acc ->
+      case Projections.history_page(room.id, user_id, presence, nil) do
+        {:ok, page} ->
+          {Map.put(messages, room.id, page.messages), Map.put(threads, room.id, page.threads),
+           Map.put(cursors, room.id, page.before)}
+
+        {:error, _reason} ->
+          acc
+      end
     end)
   end
 
@@ -367,6 +509,7 @@ defmodule Jido.Assembly.Chat do
     %{
       workspace: %{id: Seeds.workspace_id(), name: Seeds.workspace_name()},
       current_user: current_user(user_id, presence),
+      release_work: ReleaseNotes.work_view(user_id),
       demo_users: demo_users(presence),
       presence: presence,
       reaction_options: reaction_options(),
@@ -375,6 +518,7 @@ defmodule Jido.Assembly.Chat do
       direct_messages: [],
       messages_by_room: %{},
       threads_by_room: %{},
+      history_cursors: %{},
       active_room: nil,
       active_room_id: nil,
       active_room_name: "No Rooms",

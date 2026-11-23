@@ -136,3 +136,74 @@ jobs:
 
       - name: Build production assets
         run: mix assets.deploy
+
+  browser:
+    name: jido_assembly / Browser scenarios
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+        working-directory: jido_assembly
+    env:
+      MIX_ENV: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Erlang and Elixir
+        uses: erlef/setup-beam@fc68ffb90438ef2936bbb3251622353b3dcb2f93 # v1.24.0
+        with:
+          otp-version: "28.3"
+          elixir-version: "1.19.5"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version: "24"
+
+      - name: Restore Mix cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            jido_assembly/deps
+            jido_assembly/_build
+          key: ${{ runner.os }}-mix-jido-assembly-browser-${{ hashFiles('jido_assembly/mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-jido-assembly-browser-
+
+      - name: Install Mix dependencies and asset tools
+        run: |
+          set -euo pipefail
+          mix local.hex --force
+          mix local.rebar --force
+          mix deps.get
+          mix assets.setup
+
+      - name: Compile Hologram and build assets
+        run: |
+          set -euo pipefail
+          HOLOGRAM_START=1 mix compile --force --warnings-as-errors
+          mix assets.build
+
+      - name: Install Playwright, Chromium, and SQLite CLI
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/assembly-browser" --no-save --package-lock=false playwright@1.65.1
+          "$RUNNER_TEMP/assembly-browser/node_modules/.bin/playwright" install --with-deps chromium
+          sudo apt-get install -y sqlite3
+
+      - name: Run browser scenarios
+        env:
+          ASSEMBLY_PLAYWRIGHT_MODULE: ${{ runner.temp }}/assembly-browser/node_modules/playwright
+          ASSEMBLY_BROWSER_CHANNEL: chromium
+          ASSEMBLY_BROWSER_ARTIFACTS: ${{ runner.temp }}/assembly-browser-evidence
+        run: node --test --test-concurrency=1 test/browser/ui*.test.cjs
+
+      - name: Upload browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: assembly-browser-evidence
+          path: ${{ runner.temp }}/assembly-browser-evidence
+          if-no-files-found: ignore

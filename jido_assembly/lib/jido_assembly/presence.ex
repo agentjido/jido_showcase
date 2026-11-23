@@ -32,7 +32,7 @@ defmodule Jido.Assembly.Presence do
     GenServer.call(__MODULE__, {:touch, user_id, room_id, opts})
   end
 
-  @doc "Ends all sessions for one user."
+  @doc "Ends all sessions for one user, or one session when :session_id is given."
   def mark_left(user_id, opts \\ []), do: GenServer.call(__MODULE__, {:mark_left, user_id, opts})
 
   @doc false
@@ -77,11 +77,14 @@ defmodule Jido.Assembly.Presence do
     end
   end
 
-  def handle_call({:mark_left, user_id, _opts}, _from, state) do
+  def handle_call({:mark_left, user_id, opts}, _from, state) do
     online_before = online_user_ids(state)
+    session_id = Keyword.get(opts, :session_id)
 
     {removed, kept} =
-      Enum.split_with(state.sessions, fn {_id, session} -> session.user_id == user_id end)
+      Enum.split_with(state.sessions, fn {id, session} ->
+        session.user_id == user_id and (is_nil(session_id) or id == session_id)
+      end)
 
     Enum.each(removed, fn {_id, session} -> stop_session(session.pid) end)
     next = %{state | sessions: Map.new(kept)}

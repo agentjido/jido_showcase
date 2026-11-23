@@ -26,7 +26,7 @@ The package module prefix is `Jido.Assembly`.
   declarations, bridge bindings, and the managed Runtime process tree. Without
   credentials, seeded demo traffic keeps the app usable.
 - Three seeded ops agents, Triage Agent, Bridge Agent, and Runbook Agent, that
-  can run a safety-capped agent round when `ANTHROPIC_API_KEY` is present.
+  can run a safety-capped agent round with Anthropic or a local Ollama model.
 - A thin Phoenix web layer: Phoenix hosts Hologram, health checks, static
   assets, and Presence integration while the chat behavior lives in the app
   context.
@@ -35,6 +35,9 @@ The package module prefix is `Jido.Assembly`.
   responsibilities fit together for the active room.
 
 ## Run
+
+For a team workspace with separate data and named accounts, follow the
+[Assembly pilot guide](docs/assembly-pilot.md).
 
 ```sh
 mix setup
@@ -55,6 +58,19 @@ PORT=4002 mix holo
 
 Assembly stores local demo state in `data/jido_assembly_v3.sqlite3`. Delete that
 file if you want to reset the demo workspace.
+
+To try release handoffs without a model key, start with
+`JIDO_ASSEMBLY_RELEASE_DELEGATION=1 JIDO_ASSEMBLY_AGENT_MODE=scripted mix holo`.
+As Maya or Eli, mention `@triage` in `#jido-chat-release`. Triage posts its
+plan to that request's thread. Bridge and Runbook each reply to the plan with
+their assigned check. Triage combines their findings and links both replies.
+Set `JIDO_ASSEMBLY_RELEASE_PEER_CONTEXT=0` to run the checks in parallel.
+Set `JIDO_ASSEMBLY_RELEASE_ROLLOUT_REQUIRED=0` to let new requests synthesize
+the delivery finding when the optional rollout check fails.
+Set `JIDO_ASSEMBLY_RELEASE_PUBLICATION_RECOMMENDATION=1` to let Triage
+recommend staging the note for publication. A reviewer still approves the
+exact version before Assembly writes to `#release-log`.
+The integration tests use Jido agent turns and a fixture inference client.
 
 The default app works without connector credentials. To enable live connector
 routing, set any supported connector pair before starting the server. Runtime
@@ -123,7 +139,8 @@ Connector setup is per-provider. If only Telegram is configured, Telegram runs
 live and Discord stays in seeded demo mode. If neither is configured, the app is
 still fully usable with provider-shaped demo traffic.
 
-To try live AI agent actions, add an Anthropic key before starting the server:
+Set an Anthropic key or select an installed Ollama model before you start the
+server.
 
 ```sh
 cp .env.example .env
@@ -131,10 +148,15 @@ cp .env.example .env
 mix holo
 ```
 
+For Ollama, set `JIDO_ASSEMBLY_OLLAMA_MODEL` to the installed model name and tag.
+
+```sh
+JIDO_ASSEMBLY_OLLAMA_MODEL=lfm3:latest mix holo
+```
+
 Open the default `#ops-workflow` room, keep `Safety cap` enabled, type a
-question in the ops agent prompt, and click `Ask`. Each human prompt can be
-continued for two agent rounds; ask a new question to restart the discussion.
-Without `ANTHROPIC_API_KEY`, only live agent actions are disabled.
+question in the ops agent prompt, and click `Ask`. You can continue each prompt
+for two agent rounds. Ask a new question to restart the discussion.
 
 ## Dependency Note
 
@@ -160,6 +182,10 @@ the `deps/heroicons/optimized` file tree directly.
   read models.
 
 ## Testing Story
+
+The [multiplayer catalog](docs/multiplayer-scenarios.md) lists the 132
+scenarios. The [verification ledger](docs/multiplayer-verification.md)
+records the rerun commands, passing checks, and pending live setup.
 
 Assembly now has Hologram-focused ExUnit coverage in
 `test/jido_assembly/pages/assembly_page_test.exs`. These tests exercise the

@@ -6,6 +6,7 @@ defmodule Jido.Assembly.ChatRoom do
   room do
     admin("user:you")
     runtime(Module.concat(Jido.Assembly, ChatRuntime))
+    authorizer(Jido.Assembly.RoomAuthorizer)
     history_limit(500)
     member_limit(200)
   end

@@ -21,8 +21,8 @@ config :phoenix_live_view,
 config :phoenix,
   sort_verified_routes_query_params: true
 
-config :jido_assembly,
-  sqlite_path: ":memory:"
+config :jido_assembly, :bridge_options, listener_mode: :passive
+config :jido_assembly, :agent_trigger_options, enabled: false
 
 config :req_llm,
   load_dotenv: false

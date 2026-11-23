@@ -47,4 +47,20 @@ defmodule Jido.Assembly.PresenceTest do
              "jido.assembly.presence.changed"
            ]
   end
+
+  @tag scenario: "CH08"
+  test "a player stays online until their last session closes" do
+    user = "user:eli"
+    assert {:ok, _, [_joined, _changed]} = Chat.touch_presence(user, @ops_room, session_id: "one")
+    assert {:ok, _, []} = Chat.touch_presence(user, @ops_room, session_id: "two")
+
+    assert {:ok, %{sessions: [%{session_id: "two"}]}, []} =
+             Presence.mark_left(user, session_id: "one")
+
+    assert Presence.online?(user)
+    assert {:ok, %{sessions: []}, [left, changed]} = Presence.mark_left(user, session_id: "two")
+    refute Presence.online?(user)
+    assert left.type == "jido.assembly.presence.left"
+    assert changed.data.to == "offline"
+  end
 end
